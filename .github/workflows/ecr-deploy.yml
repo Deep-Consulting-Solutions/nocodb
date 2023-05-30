@@ -28,7 +28,7 @@ jobs:
     #   with:
     #     working-directory: ${{ env.working-directory }}
     - name: Install dependencies
-      run: cd packages/nocodb && 'echo @deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken="$GIT_TOKEN" >> .npmrc' && npm install
+      run: cd packages/nocodb && 'echo @deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken="$GIT_TOKEN" > .npmrc' && npm install
       shell: bash
       env:
         GIT_TOKEN: ${{secrets.GITHUB_TOKEN}}
