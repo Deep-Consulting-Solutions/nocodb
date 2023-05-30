@@ -27,6 +27,8 @@ jobs:
     # - uses: bahmutov/npm-install@v1
     #   with:
     #     working-directory: ${{ env.working-directory }}
+    - name: Install dependencies
+      run: echo '@deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}' >> .npmrc && cd packages/nocodb && npm install
 
     - name: Build nocodb and docker files
       shell: bash
