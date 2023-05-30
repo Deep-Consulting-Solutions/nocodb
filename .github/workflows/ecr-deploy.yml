@@ -34,6 +34,7 @@ jobs:
         export NODE_OPTIONS="--max_old_space_size=16384"
         targetEnv=PROD targetVersion=0.106.1 node scripts/bumpNocodbSdkVersion.js
         echo '@deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}' >> .npmrc
+        echo '@deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}' >> scripts/.npmrc
         cd packages/nocodb-sdk
         npm install && npm run build
         cd ../..
@@ -44,6 +45,7 @@ jobs:
         cd ../..
         targetEnv=PROD node scripts/upgradeNcGui.js
         cd packages/nocodb
+        echo '@deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}' >> .npmrc
         npm install
         npm run build
         npm run docker:build
