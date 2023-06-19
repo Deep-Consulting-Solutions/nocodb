@@ -33,6 +33,9 @@ type ISQLNotificationData = {
   payload: string;
 };
 
+/**
+ * - Treats all sql resources under the prefix as its own
+ */
 export class PSQLRecordOperationWatcher extends EventEmitter {
   public readonly recordOperationEventType = 'record-operation';
   private readonly rewatchErrorRetryDelayMillis = 3000;
@@ -195,8 +198,12 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     return this.createSqlIdentifier(baseData, 'notification_channel');
   }
 
+  private createSqlIdentifierPrefix ( baseData: IBaseData) {
+    return `esa_nocodb__${baseData.connectionOptions.database}`.toLowerCase();
+  };
+
   private createSqlIdentifier ( baseData: IBaseData, suffix: string,) {
-    return `esa_nocodb__${baseData.connectionOptions.database}__${suffix}`.toLowerCase();
+    return `${this.createSqlIdentifierPrefix(baseData)}__${suffix}`.toLowerCase();
   };
 
   private async setupSQLResources (baseData: IBaseData, models: Model[]) {
@@ -288,7 +295,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       // TODO: Log this error and report as incident
       return;
     }
-    
+
     const foundModelData: Record<string, any>[] = await this.ncMeta.metaList2(
       base.project_id,
       base.id,
@@ -298,7 +305,9 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     const models = foundModelData.map(foundModelDatum => new Model(foundModelDatum));
 
     const obsoleteModels: Model[] = [];
-    const newModels: Model[] = [];
+    
+    let skippedModels: Model[] = [];
+    let newModels: Model[] = [];
 
     let baseData:IBaseData = this.allBaseData.get(base.id);
 
@@ -335,6 +344,16 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       baseData.models = models;
     }
 
+    /**
+     * WARNING: remove watch on table ( especially notification table ) created by this class to avoid exaustive loop of death because nocodb will also have a model for the table. If the model is
+     * watched( an sql trigger registered for it per se ), then a direct insert, update, delete action OR an insertion of notification event from trigger of other tables will cause a 
+     * notification event to be inserted again, which causes another insertion, hence an unending loop.
+     */
+    [ newModels, skippedModels ] = newModels.reduce( (results,newModel) => {
+      results[ newModel.table_name.startsWith( this.createSqlIdentifierPrefix( baseData ) ) ? 1 : 0 ].push(newModel);
+      return results;
+    }, [[],[]] );
+
     await this.setupSQLResources(baseData, newModels);
 
     void this.consumeNotifications(baseData);
@@ -346,7 +365,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       await this.registerListeners(baseData, connection);
     }
 
-    await Promise.all(obsoleteModels.map( obsoleteModel => this.disposeSQLResourcesForModel(baseData, obsoleteModel) ));
+    await Promise.all(obsoleteModels.concat(skippedModels).map( model => this.disposeSQLResourcesForModel(baseData, model) ));
 
     this.allBaseData.set(base.id, baseData);
   }
