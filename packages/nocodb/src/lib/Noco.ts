@@ -311,7 +311,7 @@ export default class Noco {
           function () {
             // this is critical, as events needs to be fired as quick as possible to meet business/app requirement though they will be in notifications table waiting to be picked.
             // It is better the program is down so this should be taken more seriously.
-            process.exit(1);
+            // process.exit(1);
           }
         );
       }
