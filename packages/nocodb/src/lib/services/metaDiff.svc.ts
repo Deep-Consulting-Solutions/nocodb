@@ -264,6 +264,12 @@ async function getMetaDiff(
   for (const relationCol of virtualRelationColumns) {
     const colOpt = await relationCol.getColOptions<LinkToAnotherRecordColumn>();
     if (!colOpt) {
+      // adding this to make sure relations no longer found get deleted from meta
+      changes[0].detectedChanges.push({
+        type: MetaDiffType.TABLE_RELATION_REMOVE,
+        colId: relationCol.id,
+        column: relationCol,
+      });
       continue;
     }
     const parentCol = await colOpt.getParentColumn();
@@ -891,7 +897,7 @@ export async function baseMetaDiffSync(param: {
           await change.column.delete();
           break;
         case MetaDiffType.TABLE_RELATION_REMOVE:
-        case MetaDiffType.TABLE_VIRTUAL_M2M_REMOVE:
+        case MetaDiffType.TABLE_VIRTUAL_M2M_REMOVE: // ///////////////////////
           await change.column.delete();
           break;
         case MetaDiffType.TABLE_RELATION_ADD:
