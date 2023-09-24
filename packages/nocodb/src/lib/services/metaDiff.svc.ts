@@ -798,8 +798,10 @@ export async function baseMetaDiffSync(param: {
   /* Get all relations */
   // const relations = (await sqlClient.relationListAll())?.data?.list;
 
+  console.log(changes);
   for (const { table_name, detectedChanges } of changes) {
     for (const change of detectedChanges) {
+      console.log({ change });
       switch (change.type) {
         case MetaDiffType.TABLE_NEW:
           {
