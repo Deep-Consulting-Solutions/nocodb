@@ -249,6 +249,15 @@ export default class Base implements BaseType {
       return config;
     }
 
+    console.log({ config: this.config });
+    console.log({ secret: Noco.getConfig()?.auth?.jwt?.secret });
+    console.log(
+      CryptoJS.AES.decrypt(
+        this.config,
+        Noco.getConfig()?.auth?.jwt?.secret
+      ).toString(CryptoJS.enc.Utf8)
+    );
+
     const config = JSON.parse(
       CryptoJS.AES.decrypt(
         this.config,
