@@ -24,7 +24,11 @@ export async function projectGet(
     projectId: req.params.projectId,
   });
 
+  console.log({beforeSanitization: project});
+  console.log('................')
   projectService.sanitizeProject(project);
+  console.log({afterSanitization: project});
+  console.log('................')
 
   res.json(project);
 }
