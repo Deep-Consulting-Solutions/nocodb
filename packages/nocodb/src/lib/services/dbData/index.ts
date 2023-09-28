@@ -200,20 +200,24 @@ export async function dataRead(
   const { model, view } = await getViewAndModelByAliasOrId(param);
 
   const base = await Base.get(model.base_id);
+  console.log('>>>>base', base)
 
   const baseModel = await Model.getBaseModelSQL({
     id: model.id,
     viewId: view?.id,
     dbDriver: await NcConnectionMgrv2.get(base),
   });
+  console.log('baseModel', baseModel)
 
   const row = await baseModel.readByPk(param.rowId);
+  console.log('>>>row', row)
 
   if (!row) {
     NcError.notFound('Row not found');
   }
 
   const { ast } = await getAst({ model, query: param.query, view });
+  console.log('>>>>ast', ast)
 
   return await nocoExecute(ast, row, {}, param.query);
 }

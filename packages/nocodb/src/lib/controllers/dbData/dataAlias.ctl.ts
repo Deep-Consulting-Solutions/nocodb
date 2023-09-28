@@ -90,6 +90,7 @@ async function dataDelete(req: Request, res: Response) {
 }
 
 async function dataRead(req: Request, res: Response) {
+  console.log('>>>awes')
   res.json(
     await dataService.dataRead({
       projectName: req.params.projectName,
