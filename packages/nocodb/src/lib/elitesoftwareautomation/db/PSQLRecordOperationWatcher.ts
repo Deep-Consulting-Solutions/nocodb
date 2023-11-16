@@ -34,6 +34,8 @@ type ISQLNotificationData = {
   payload: string;
 };
 
+const regexForCharactersToReplace = /-/g;
+
 /**
  * - Treats all sql resources under the prefix as its own
  */
@@ -250,13 +252,15 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   private createSqlIdentifierPrefix(baseData: IBaseData) {
-    return `esa_nocodb__${baseData.connectionOptions.database}`.toLowerCase();
+    return `esa_nocodb__${baseData.connectionOptions.database}`
+      .toLowerCase()
+      .replace(regexForCharactersToReplace, '_');
   }
 
   private createSqlIdentifier(baseData: IBaseData, suffix: string) {
-    return `${this.createSqlIdentifierPrefix(
-      baseData
-    )}__${suffix}`.toLowerCase();
+    return `${this.createSqlIdentifierPrefix(baseData)}__${suffix}`
+      .toLowerCase()
+      .replace(regexForCharactersToReplace, '_');
   }
 
   private async setupSQLResources(baseData: IBaseData, models: Model[]) {
