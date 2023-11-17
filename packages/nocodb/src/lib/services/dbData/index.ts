@@ -7,6 +7,14 @@ import NcConnectionMgrv2 from '../../utils/common/NcConnectionMgrv2';
 import { getViewAndModelByAliasOrId } from './helpers';
 import type { PathParams } from './helpers';
 
+const log = (
+  message: string,
+  extraData?: any,
+  level: 'log' | 'error' | 'warn' | 'info' = 'log'
+) => {
+  console[level](`helpers : ${message}`, extraData);
+};
+
 export async function dataList(param: PathParams & { query: any }) {
   const { model, view } = await getViewAndModelByAliasOrId(param);
   const responseData = await getDataList({ model, view, query: param.query });
@@ -121,6 +129,9 @@ export async function getDataList(param: {
   console.log('getDataList finished getting model ...');
 
   console.log('getDataList about to get ast ....');
+  log(JSON.stringify({ model }));
+  log(JSON.stringify({ query }));
+  log(JSON.stringify({ view }));
   const { ast, dependencyFields } = await getAst({ model, query, view });
   console.log('getDataList finished getting ast ....');
 
@@ -136,6 +147,8 @@ export async function getDataList(param: {
   let count = 0;
   try {
     console.log('getDataList about to get data ....');
+    log(JSON.stringify({ ast }));
+    log(JSON.stringify({ listArgs }));
     data = await nocoExecute(ast, await baseModel.list(listArgs), {}, listArgs);
     console.log('getDataList finished getting data ....');
 
@@ -146,6 +159,8 @@ export async function getDataList(param: {
     console.log(e);
     NcError.internalServerError('Please check server log for more details');
   }
+
+  log(JSON.stringify({ data }));
 
   return new PagedResponseImpl(data, {
     ...query,
