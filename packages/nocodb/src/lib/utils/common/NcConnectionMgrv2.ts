@@ -52,15 +52,27 @@ export default class NcConnectionMgrv2 {
   // NC_DATA_DB is not available in community version
   // make it return Promise<XKnex> to avoid conflicts
   public static async get(base: Base): Promise<XKnex> {
+    try {
+      console.log('-->', { base: JSON.stringify(base) });
+      console.log('-->', { connectionRefs: JSON.stringify(this.connectionRefs) });
+    } catch (error) {}
+
     if (base.is_meta) return Noco.ncMeta.knex;
 
     if (this.connectionRefs?.[base.project_id]?.[base.id]) {
       return this.connectionRefs?.[base.project_id]?.[base.id];
     }
+
+
     this.connectionRefs[base.project_id] =
       this.connectionRefs?.[base.project_id] || {};
 
     const connectionConfig = await base.getConnectionConfig();
+
+    try {
+      console.log('-->', 'connection not found creating new connection');
+      console.log('-->', { connectionConfig: JSON.stringify(connectionConfig) });
+    } catch (error) {}
 
     this.connectionRefs[base.project_id][base.id] = XKnex({
       ...defaultConnectionOptions,
@@ -68,6 +80,7 @@ export default class NcConnectionMgrv2 {
       connection: {
         ...defaultConnectionConfig,
         ...connectionConfig.connection,
+        statement_timeout: 45000,
         typeCast(_field, next) {
           const res = next();
           if (res instanceof Buffer) {
