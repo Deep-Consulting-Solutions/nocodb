@@ -31,7 +31,7 @@ export const getIncidentHandlerConfig = ({
 
   return {
     app,
-    projectName: 'NocoDB',
+    projectName: `${process.env.ESA_PROJECT_NAME || ''} - NocoDB`,
     connection,
     entities: {
       ServerIncident,
