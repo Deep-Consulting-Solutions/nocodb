@@ -53,9 +53,10 @@ export default class NcConnectionMgrv2 {
   // make it return Promise<XKnex> to avoid conflicts
   public static async get(base: Base): Promise<XKnex> {
     try {
-      console.log('-->', { base: JSON.stringify(base) });
-      console.log('-->', { connectionRefs: JSON.stringify(this.connectionRefs) });
-    } catch (error) {}
+      global.console.log('-->', { base });
+      global.console.log('-->', { connectionRefs: JSON.stringify(this.connectionRefs) });
+      global.console.log('-->', this.connectionRefs);
+    } catch (error) { console.error(error) }
 
     if (base.is_meta) return Noco.ncMeta.knex;
 
@@ -70,11 +71,11 @@ export default class NcConnectionMgrv2 {
     const connectionConfig = await base.getConnectionConfig();
 
     try {
-      console.log('-->', 'connection not found creating new connection');
-      console.log('-->', { connectionConfig: JSON.stringify(connectionConfig) });
-    } catch (error) {}
+      global.console.log('-->', 'connection not found creating new connection');
+      global.console.log(connectionConfig);
+    } catch (error) { console.error(error) }
 
-    this.connectionRefs[base.project_id][base.id] = XKnex({
+    const finalConnectionConfig = {
       ...defaultConnectionOptions,
       ...connectionConfig,
       connection: {
@@ -91,6 +92,15 @@ export default class NcConnectionMgrv2 {
           return res;
         },
       },
+    }
+
+    try {
+      global.console.log('finalConnectionConfig');
+      global.console.log(finalConnectionConfig);
+    } catch (error) { console.error(error) }
+
+    this.connectionRefs[base.project_id][base.id] = XKnex({
+      ...finalConnectionConfig,
     } as any);
     return this.connectionRefs[base.project_id][base.id];
   }
