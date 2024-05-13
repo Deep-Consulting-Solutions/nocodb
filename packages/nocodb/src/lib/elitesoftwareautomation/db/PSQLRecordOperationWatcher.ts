@@ -1,17 +1,16 @@
 import EventEmitter from 'events';
 import { isEqual, merge, pick } from 'lodash';
 import { nocoExecute } from 'nc-help';
-import { Hook, Model, Project } from '../../models';
-import { XKnex } from '../../db/sql-data-mapper';
-import { MetaTable } from '../../utils/globals';
-import NcConnectionMgrv2 from '../../utils/common/NcConnectionMgrv2';
-import getAst from '../../db/sql-data-mapper/lib/sql/helpers/getAst';
-import { sanitize } from '../../db/sql-data-mapper/lib/sql/helpers/sanitize';
-import { invokeWebhook } from '../../meta/helpers/webhookHelpers';
-import type NcMetaIO from '../../meta/NcMetaIO';
+import { invokeWebhook } from 'src/helpers/webhookHelpers';
+import { sanitize } from 'src/helpers/sqlSanitize';
+import NcConnectionMgrv2 from 'src/utils/common/NcConnectionMgrv2';
+import { Base, Hook, Model } from 'src/models';
+import { MetaTable } from 'src/utils/globals';
+import { XKnex } from 'src/db/CustomKnex';
+import getAst from 'src/helpers/getAst';
+import type { Source } from 'src/models';
 import type { HookType } from 'nocodb-sdk';
-import type { Base } from '../../models';
-import type Connection from 'mysql2/typings/mysql/lib/Connection';
+import type { Connection } from 'mysql2/typings/mysql/lib/Connection';
 
 export type PSQLRecordOperationEvent = {
   base: Base;
@@ -21,8 +20,18 @@ export type PSQLRecordOperationEvent = {
   newData: Record<string, any>;
 };
 
+type NcMetaIO = {
+  metaList2: (
+    projectId: string,
+    baseId: string,
+    models: string,
+    params: any,
+  ) => Promise<Record<string, unknown>[]>;
+};
+
 type IBaseData = {
   base: Base;
+  source: Source;
   models: Model[];
   knex: XKnex;
   connectionOptions: { [k: string]: any; database: string };
@@ -93,7 +102,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
     const baseModel = await Model.getBaseModelSQL({
       id: model.id,
-      dbDriver: await NcConnectionMgrv2.get(baseData.base),
+      dbDriver: await NcConnectionMgrv2.get(baseData.source),
     });
 
     if (modelData) {
@@ -397,16 +406,14 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     return this._watchBaseInternal(base, false);
   }
 
-  private async _watchBaseInternal(base: Base, rewatch: boolean) {
-    if (!base.id) {
-      // TODO: Log this error and report as incident
-      return;
-    }
-
-    if (base.is_meta) return;
-
+  private async _watchBaseInternalAndSource(
+    base: Base,
+    source: Source,
+    rewatch: boolean,
+  ) {
+    const project = await source.getProject();
     const foundModelData: Record<string, any>[] = await this.ncMeta.metaList2(
-      base.project_id,
+      project.id,
       base.id,
       MetaTable.MODELS,
       {
@@ -427,10 +434,10 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
     let baseData: IBaseData = this.allBaseData.get(base.id);
 
-    this.log(`watching base ${base.alias}`);
-    this.log(`watching base ${base.id}`);
+    this.log(`watching source ${source.alias}`);
+    this.log(`watching base ${source.id}`);
 
-    const connectionOptions = (await base.getConnectionConfig()).connection;
+    const connectionOptions = (await source.getConnectionConfig()).connection;
 
     const createNewBaseData =
       !baseData ||
@@ -445,12 +452,13 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     }
 
     if (createNewBaseData) {
-      const knex = await this.createKnex(base);
+      const knex = await this.createKnex(base, source);
       baseData = {
         base,
         models,
         knex,
         connectionOptions,
+        source,
       };
 
       newModels.push(...models);
@@ -498,7 +506,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     const pickedFields = ['id', 'table_name', 'title'];
     this.log(
       `watching base : ${base.id} , ${
-        (await base.getConnectionConfig()).database
+        (await source.getConnectionConfig()).database
       }`,
     );
     this.log(
@@ -544,6 +552,20 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     this.allBaseData.set(base.id, baseData);
   }
 
+  private async _watchBaseInternal(base: Base, rewatch: boolean) {
+    if (!base.id) {
+      // TODO: Log this error and report as incident
+      return;
+    }
+
+    if (base.is_meta) return;
+
+    this.log(`watching base ${base.id}`);
+    base.sources.forEach((source) => {
+      this._watchBaseInternalAndSource(base, source, rewatch);
+    });
+  }
+
   async unwatchBase(base: Base) {
     const baseData = this.allBaseData.get(base.id);
     if (baseData) {
@@ -567,10 +589,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   async watchAllBases() {
-    const projects = await Project.list({});
-    const bases = (
-      await Promise.all(projects.map((project) => project.getBases()))
-    ).flat();
+    const bases = await Base.list({});
     const baseIds = bases.map((base) => base.id);
     //////// Retreive watched base data from DB and set it in this.allBaseData.
 
@@ -591,8 +610,10 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     }
   }
 
-  private async createKnex(base: Base): Promise<XKnex> {
-    const connectionConfig = await base.getConnectionConfig();
+  private async createKnex(base: Base, source: Source): Promise<XKnex> {
+    const s = await base.getSources();
+    s[0].getProject();
+    const connectionConfig = await source.getConnectionConfig();
     const options = merge(connectionConfig, {
       pool: {
         min: 0,
@@ -603,6 +624,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   static defaultInstance: PSQLRecordOperationWatcher;
+
   static async watchForWebhook(ncMeta: NcMetaIO) {
     const recordOperationWatcher = new PSQLRecordOperationWatcher(ncMeta);
     PSQLRecordOperationWatcher.defaultInstance = recordOperationWatcher;
@@ -622,9 +644,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
           newData = oldData;
           oldData = null;
         }
-        const project = await Project.get(model.project_id);
-        const bases = await project.getBases();
-        const currentBase = bases.find((base) => base.id === model.base_id);
+        const currentBase = await Base.get(model.base_id);
         const shouldNotProceed =
           currentBase.is_meta ||
           process.env.ESA_SKIP_DB_RECORD_ACTION_EVENT_WATCHER_FOR_WEBHOOK ===

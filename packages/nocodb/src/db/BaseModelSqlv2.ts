@@ -42,6 +42,7 @@ import type {
 } from '~/models';
 import {
   Audit,
+  Base,
   BaseUser,
   Column,
   Filter,
@@ -4433,9 +4434,7 @@ class BaseModelSqlv2 {
   }
 
   protected async handleHooks(hookName, prevData, newData, req): Promise<void> {
-    const project = await Project.get(this.model.project_id);
-    const bases = await project.getBases();
-    const currentBase = bases.find((base) => base.id === this.model.base_id);
+    const currentBase = await Base.get(this.model.base_id);
     const shouldProceed =
       currentBase.is_meta ||
       process.env.ESA_SKIP_DB_RECORD_ACTION_EVENT_WATCHER_FOR_WEBHOOK ===

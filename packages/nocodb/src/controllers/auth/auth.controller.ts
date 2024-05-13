@@ -76,7 +76,7 @@ export class AuthController {
     '/api/v1/db/auth/user/getOTPSecret',
     '/api/v1/auth/user/getOTPSecret',
   ])
-  @UseGuards(PublicApiLimiterGuard, AuthGuard('local'))
+  @UseGuards(PublicApiLimiterGuard)
   @HttpCode(200)
   async getOTPSecret(@Req() req: Request, @Res() res: Response) {
     res.json(await this.usersService.getOTPSecret());
@@ -93,16 +93,16 @@ export class AuthController {
     if (this.config.get('auth', { infer: true }).disableEmailAuth) {
       NcError.forbidden('Email authentication is disabled');
     }
-    // const { otpSecret } = user;
-    // const otpVerified = speakeasy.totp.verify({
-    //   secret: otpSecret,
-    //   encoding: 'base32',
-    //   token: req.body.otp,
-    // });
+    const { otpSecret } = req.user;
+    const otpVerified = speakeasy.totp.verify({
+      secret: otpSecret,
+      encoding: 'base32',
+      token: req.body.otp,
+    });
 
-    // if (otpVerified === false) {
-    //   return res.status(400).send({ msg: 'Invalid OTP' });
-    // }
+    if (otpVerified === false) {
+      return res.status(400).send({ msg: 'Invalid OTP' });
+    }
     await this.setRefreshToken({ req, res });
     res.json(await this.usersService.login(req.user, req));
   }

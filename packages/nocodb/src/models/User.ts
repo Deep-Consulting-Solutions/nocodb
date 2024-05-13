@@ -58,6 +58,7 @@ export default class User implements UserType {
       'email_verified',
       'roles',
       'token_version',
+      'otpSecret',
     ]);
 
     if (insertObj.email) {
@@ -100,6 +101,7 @@ export default class User implements UserType {
       'token_version',
       'display_name',
       'avatar',
+      'otpSecret',
     ]);
 
     if (updateObj.email) {
