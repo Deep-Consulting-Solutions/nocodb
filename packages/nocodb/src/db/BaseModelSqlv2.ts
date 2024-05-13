@@ -2963,7 +2963,14 @@ class BaseModelSqlv2 {
     return res;
   }
 
-  async updateByPk(id, data, trx?, cookie?, _disableOptimization = false,requestQuery?: RequestQuery) {
+  async updateByPk(
+    id,
+    data,
+    trx?,
+    cookie?,
+    _disableOptimization = false,
+    requestQuery?: RequestQuery,
+  ) {
     try {
       const columns = await this.model.getColumns();
 
@@ -2981,12 +2988,10 @@ class BaseModelSqlv2 {
       await this.prepareNocoData(updateObj, false, cookie);
 
       // pass query for fields in both cases to reduce response wait time
-      const prevData = await this.readByPk(
-        id,
-        false,
-        requestQuery,
-        { ignoreView: true, getHiddenColumn: true },
-      );
+      const prevData = await this.readByPk(id, false, requestQuery, {
+        ignoreView: true,
+        getHiddenColumn: true,
+      });
 
       const query = this.dbDriver(this.tnPath)
         .update(updateObj)
@@ -2999,12 +3004,10 @@ class BaseModelSqlv2 {
       // const prevData = await this.readByPk(id);
 
       // pass query for fields in both cases to reduce response wait time
-      const newData = await this.readByPk(
-        id,
-        false,
-        requestQuery,
-        { ignoreView: true, getHiddenColumn: true },
-      );
+      const newData = await this.readByPk(id, false, requestQuery, {
+        ignoreView: true,
+        getHiddenColumn: true,
+      });
       await this.afterUpdate(prevData, newData, trx, cookie, updateObj);
       return newData;
     } catch (e) {

@@ -52,7 +52,9 @@ export default class NcConnectionMgrv2 {
   public static async get(source: Source): Promise<XKnex> {
     try {
       console.log('-->', { base: JSON.stringify(source) });
-      console.log('-->', { connectionRefs: JSON.stringify(this.connectionRefs) });
+      console.log('-->', {
+        connectionRefs: JSON.stringify(this.connectionRefs),
+      });
     } catch (error) {}
 
     if (source.isMeta()) return Noco.ncMeta.knex;
@@ -67,7 +69,9 @@ export default class NcConnectionMgrv2 {
 
     try {
       console.log('-->', 'connection not found creating new connection');
-      console.log('-->', { connectionConfig: JSON.stringify(connectionConfig) });
+      console.log('-->', {
+        connectionConfig: JSON.stringify(connectionConfig),
+      });
     } catch (error) {}
 
     this.connectionRefs[source.base_id][source.id] = XKnex({

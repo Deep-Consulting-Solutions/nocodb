@@ -25,7 +25,7 @@ export const getIncidentHandlerConfig = ({
   let ticketBlueprintTransitions = [];
   try {
     ticketBlueprintTransitions = JSON.parse(
-      process.env.INCIDENT_HANDLING_DESK_TICKET_RESOLUTION_BLUEPRINTS
+      process.env.INCIDENT_HANDLING_DESK_TICKET_RESOLUTION_BLUEPRINTS,
     );
   } catch (e) {}
 
@@ -76,7 +76,7 @@ export const getIncidentHandlerConfig = ({
 
 export const setupReusablesAndRoutes = async (
   app: any,
-  connection: Connection
+  connection: Connection,
 ) => {
   await IncidentHandler.setup(getIncidentHandlerConfig({ app, connection }));
 };

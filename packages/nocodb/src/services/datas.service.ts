@@ -15,7 +15,7 @@ import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
 const log = (
   message: string,
   extraData?: any,
-  level: 'log' | 'error' | 'warn' | 'info' = 'log'
+  level: 'log' | 'error' | 'warn' | 'info' = 'log',
 ) => {
   console[level](`helpers : ${message}`, extraData);
 };
@@ -112,7 +112,7 @@ export class DatasService {
       cookie: any;
       rowId: string;
       disableOptimization?: boolean;
-      query?: any
+      query?: any;
     },
   ) {
     const { model, view } = await getViewAndModelByAliasOrId(param);
@@ -130,7 +130,7 @@ export class DatasService {
       null,
       param.cookie,
       param.disableOptimization,
-      param.query
+      param.query,
     );
   }
 
@@ -167,11 +167,10 @@ export class DatasService {
   }) {
     const { model, view, query = {}, ignoreViewFilterAndSort = false } = param;
 
-
     console.log('getDataList about to get base ...');
     const source = await Source.get(model.source_id);
     console.log('getDataList finished getting base ...');
-  
+
     console.log('getDataList about to get model ...');
 
     const baseModel =
@@ -181,12 +180,12 @@ export class DatasService {
         viewId: view?.id,
         dbDriver: await NcConnectionMgrv2.get(source),
       }));
-      console.log('getDataList finished getting model ...');
-    
-      console.log('getDataList about to get ast ....');
-      log(JSON.stringify({ model }));
-      log(JSON.stringify({ query }));
-      log(JSON.stringify({ view }));
+    console.log('getDataList finished getting model ...');
+
+    console.log('getDataList about to get ast ....');
+    log(JSON.stringify({ model }));
+    log(JSON.stringify({ query }));
+    log(JSON.stringify({ view }));
 
     const { ast, dependencyFields } = await getAst({
       model,

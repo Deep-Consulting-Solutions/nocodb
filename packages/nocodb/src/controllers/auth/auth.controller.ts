@@ -74,7 +74,7 @@ export class AuthController {
   @Post([
     '/auth/user/getOTPSecret',
     '/api/v1/db/auth/user/getOTPSecret',
-    '/api/v1/auth/user/getOTPSecret'
+    '/api/v1/auth/user/getOTPSecret',
   ])
   @UseGuards(PublicApiLimiterGuard, AuthGuard('local'))
   @HttpCode(200)

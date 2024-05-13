@@ -2,10 +2,10 @@ import dns from 'node:dns';
 import cors from 'cors';
 import express from 'express';
 import { getConnectionManager } from 'typeorm';
-import Noco from '~/Noco';
 import { createDatabaseConnection, runMigrations } from '../databaseConnection';
 import { setupReusablesAndRoutes } from '../reusables';
 import type { Connection } from 'typeorm';
+import Noco from '~/Noco';
 
 // ref: https://github.com/nodejs/node/issues/40702#issuecomment-1103623246
 dns.setDefaultResultOrder('ipv4first');

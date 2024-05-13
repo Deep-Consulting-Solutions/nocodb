@@ -466,13 +466,13 @@ export default class Base implements BaseType {
         // parse meta
         baseData.meta = parseMetaProp(baseData);
 
-      console.log('about to set project ref  titleOrId in cache');
-      await NocoCache.set(
+        console.log('about to set project ref  titleOrId in cache');
+        await NocoCache.set(
           `${CacheScope.PROJECT_ALIAS}:ref:${titleOrId}`,
           baseData?.id,
         );
-      console.log('finished to set project ref  titleOrId in cache');
-    }
+        console.log('finished to set project ref  titleOrId in cache');
+      }
     } else {
       return this.get(baseId);
     }

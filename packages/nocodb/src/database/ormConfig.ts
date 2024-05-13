@@ -8,7 +8,7 @@ const ormConfig = () => {
   const parsedQuery: any = {};
   for (const [key, value] of url.searchParams.entries()) {
     const fnd = knownQueryParams.find(
-      (param) => param.parameter === key || param.aliases.includes(key)
+      (param) => param.parameter === key || param.aliases.includes(key),
     );
     if (fnd) {
       parsedQuery[fnd.parameter] = value;

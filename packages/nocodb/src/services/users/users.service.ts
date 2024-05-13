@@ -402,35 +402,32 @@ export class UsersService {
     }
   }
 
+  async getOTPSecret(): Promise<any> {
+    try {
+      const secretLength = 20;
+      const secret = speakeasy.generateSecret({ length: secretLength });
 
-
- async  getOTPSecret(): Promise<any> {
-  try {
-    const secretLength = 20;
-    const secret = speakeasy.generateSecret({ length: secretLength });
-
-    const QRCodePromise = new Promise((resolve, reject) => {
-      QRCode.toDataURL(secret.otpauth_url, (err, url) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(url);
-        }
+      const QRCodePromise = new Promise((resolve, reject) => {
+        QRCode.toDataURL(secret.otpauth_url, (err, url) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(url);
+          }
+        });
       });
-    });
 
-    const QRCodeURL = await QRCodePromise;
+      const QRCodeURL = await QRCodePromise;
 
-    return {
-      digits: 6,
-      secret: secret.base32,
-      QRCodeURL,
-    } as any;
-  } catch (e) {
-    NcError.badRequest(e.message);
+      return {
+        digits: 6,
+        secret: secret.base32,
+        QRCodeURL,
+      } as any;
+    } catch (e) {
+      NcError.badRequest(e.message);
+    }
   }
-}
-
 
   async signup(param: {
     body: SignUpReqType;
@@ -439,22 +436,25 @@ export class UsersService {
   }): Promise<any> {
     validatePayload('swagger.json#/components/schemas/SignUpReq', param.body);
 
-    const { email: _email, token, ignore_subscribe,
+    const {
+      email: _email,
+      token,
+      ignore_subscribe,
       otpSecret,
-      otp, } = param.req.body;
+      otp,
+    } = param.req.body;
 
     let { password } = param.req.body;
 
+    const otpVerified = speakeasy.totp.verify({
+      secret: otpSecret,
+      encoding: 'base32',
+      token: otp,
+    });
 
-  const otpVerified = speakeasy.totp.verify({
-    secret: otpSecret,
-    encoding: 'base32',
-    token: otp,
-  });
-
-  if (otpVerified === false) {
-    NcError.badRequest(`Invalid OTP`);
-  }
+    if (otpVerified === false) {
+      NcError.badRequest(`Invalid OTP`);
+    }
 
     // validate password and throw error if password is satisfying the conditions
     const { valid, error } = validatePassword(password);
@@ -505,7 +505,7 @@ export class UsersService {
           invite_token: null,
           invite_token_expires: null,
           email: user.email,
-          otpSecret
+          otpSecret,
         });
       } else {
         NcError.badRequest('User already exist');
@@ -518,7 +518,7 @@ export class UsersService {
           password,
           email_verification_token,
           req: param.req,
-          otpSecret
+          otpSecret,
         });
       createdProject = _createdProject;
     }

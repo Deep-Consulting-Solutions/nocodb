@@ -396,7 +396,7 @@ export async function handleHttpWebHook(
                 return `System triggered - ${defaultTitle}`;
               }
               return defaultTitle;
-            }
+            },
           );
         } catch (incidentError) {
           reject(incidentError);

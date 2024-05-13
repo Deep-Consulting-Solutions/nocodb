@@ -1,8 +1,8 @@
+import { getRedisURI } from 'src/database/redis';
 import RedisCacheMgr from './RedisCacheMgr';
 import RedisMockCacheMgr from './RedisMockCacheMgr';
 import type CacheMgr from './CacheMgr';
 import { CacheGetType } from '~/utils/globals';
-import { getRedisURI } from 'src/database/redis';
 
 export default class NocoCache {
   private static client: CacheMgr;

@@ -1,3 +1,4 @@
+import * as nc_030_add_otpSecret_to_users from './v2/nc_030_add_otpSecret_to_users';
 import * as nc_011 from '~/meta/migrations/v2/nc_011';
 import * as nc_012_alter_column_data_types from '~/meta/migrations/v2/nc_012_alter_column_data_types';
 import * as nc_013_sync_source from '~/meta/migrations/v2/nc_013_sync_source';
@@ -32,7 +33,6 @@ import * as nc_042_user_block from '~/meta/migrations/v2/nc_042_user_block';
 import * as nc_043_user_refresh_token from '~/meta/migrations/v2/nc_043_user_refresh_token';
 import * as nc_044_view_column_index from '~/meta/migrations/v2/nc_044_view_column_index';
 import * as nc_045_extensions from '~/meta/migrations/v2/nc_045_extensions';
-import * as nc_030_add_otpSecret_to_users from './v2/nc_030_add_otpSecret_to_users';
 
 // Create a custom migration source class
 export default class XcMigrationSourcev2 {
