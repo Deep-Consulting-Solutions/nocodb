@@ -96,3 +96,6 @@ test_noco.db
 httpbin
 .run/test-debug.run.xml
 
+
+# Dev
+.env

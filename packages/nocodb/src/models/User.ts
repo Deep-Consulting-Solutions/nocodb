@@ -28,6 +28,7 @@ export default class User implements UserType {
   email_verified: boolean;
   roles?: string;
   token_version?: string;
+  otpSecret?: string;
 
   display_name?: string;
   avatar?: string;

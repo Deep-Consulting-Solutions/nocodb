@@ -1,4 +1,4 @@
-import { MetaTable } from '../../utils/globals';
+import { MetaTable } from 'src/utils/globals';
 import type { Knex } from 'knex';
 
 const up = async (knex: Knex) => {

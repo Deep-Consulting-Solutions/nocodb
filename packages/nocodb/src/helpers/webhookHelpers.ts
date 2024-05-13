@@ -8,6 +8,7 @@ import { isDateMonthFormat, UITypes } from 'nocodb-sdk';
 import isBetween from 'dayjs/plugin/isBetween';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
+import { createIncidentLog } from 'src/lib/incidentLogger';
 import NcPluginMgrv2 from './NcPluginMgrv2';
 import type { HookLogType } from 'nocodb-sdk';
 import type { Column, FormView, Hook, Model, View } from '~/models';

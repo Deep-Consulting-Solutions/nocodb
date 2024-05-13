@@ -1,6 +1,6 @@
 import IncidentHandler from '@deep-consulting-solutions/incident-handling';
+import RedisCacheMgr from 'src/cache/RedisCacheMgr';
 import { DataRecoveryActivity, ServerIncident } from '../database/entities';
-import RedisCacheMgr from '../lib/cache/RedisCacheMgr';
 import { getRedisURI } from '../database/redis';
 import type { IncidentHandlerOptions } from '@deep-consulting-solutions/incident-handling';
 import type { Application } from 'express';
