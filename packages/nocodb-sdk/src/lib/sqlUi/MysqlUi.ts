@@ -97,28 +97,52 @@ export class MysqlUi {
         title: 'CreatedAt',
         dt: 'timestamp',
         dtx: 'specificType',
-        ct: 'varchar(45)',
+        ct: 'timestamp',
         nrqd: true,
         rqd: false,
         ck: false,
         pk: false,
         un: false,
         ai: false,
-        cdf: 'CURRENT_TIMESTAMP',
+        cdf: null,
         clen: 45,
         np: null,
         ns: null,
         dtxp: '',
         dtxs: '',
         altered: 1,
-        uidt: UITypes.DateTime,
+        uidt: UITypes.CreatedTime,
         uip: '',
         uicn: '',
+        system: true,
       },
       {
         column_name: 'updated_at',
         title: 'UpdatedAt',
         dt: 'timestamp',
+        dtx: 'specificType',
+        ct: 'timestamp',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        clen: 45,
+        np: null,
+        ns: null,
+        dtxp: '',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.LastModifiedTime,
+        uip: '',
+        uicn: '',
+        system: true,
+      },
+      {
+        column_name: 'created_by',
+        title: 'nc_created_by',
+        dt: 'varchar',
         dtx: 'specificType',
         ct: 'varchar(45)',
         nrqd: true,
@@ -127,16 +151,39 @@ export class MysqlUi {
         pk: false,
         un: false,
         ai: false,
-        cdf: 'CURRENT_TIMESTAMP on update CURRENT_TIMESTAMP',
         clen: 45,
         np: null,
         ns: null,
-        dtxp: '',
+        dtxp: '45',
         dtxs: '',
         altered: 1,
-        uidt: UITypes.DateTime,
+        uidt: UITypes.CreatedBy,
         uip: '',
         uicn: '',
+        system: true,
+      },
+      {
+        column_name: 'updated_by',
+        title: 'nc_updated_by',
+        dt: 'varchar',
+        dtx: 'specificType',
+        ct: 'varchar(45)',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        clen: 45,
+        np: null,
+        ns: null,
+        dtxp: '45',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.LastModifiedBy,
+        uip: '',
+        uicn: '',
+        system: true,
       },
     ];
   }
@@ -206,7 +253,7 @@ export class MysqlUi {
 
       case 'datetime':
       case 'timestamp':
-        return 6;
+        return '';
 
       case 'time':
         return '';
@@ -657,6 +704,7 @@ export class MysqlUi {
   static columnEditable(colObj) {
     return colObj.tn !== '_evolutions' || colObj.tn !== 'nc_evolutions';
   }
+  /*
 
   static extractFunctionName(query) {
     const reg =
@@ -695,18 +743,18 @@ export class MysqlUi {
   }
 
   static splitQueries(query) {
-    /***
+    /!***
      * we are splitting based on semicolon
      * there are mechanism to escape semicolon within single/double quotes(string)
-     */
+     *!/
     return query.match(/\b("[^"]*;[^"]*"|'[^']*;[^']*'|[^;])*;/g);
   }
 
-  /**
+  /!**
    * if sql statement is SELECT - it limits to a number
    * @param args
    * @returns {string|*}
-   */
+   *!/
   static sanitiseQuery(args) {
     let q = args.query.trim().split(';');
 
@@ -834,6 +882,7 @@ export class MysqlUi {
   static isValidDate(value) {
     return new Date(value).getTime() > 0;
   }
+*/
 
   static colPropAuDisabled(_col) {
     return true;
@@ -871,7 +920,7 @@ export class MysqlUi {
   }
 
   static getAbstractType(col): any {
-    switch (col.dt.toLowerCase()) {
+    switch (col.dt?.toLowerCase()) {
       case 'int':
       case 'smallint':
       case 'mediumint':
@@ -985,7 +1034,7 @@ export class MysqlUi {
         colProp.dt = 'set';
         if (
           col.colOptions?.options.length > 64 ||
-          col.dtxp?.split(',').length > 64
+          col.dtxp?.toString?.()?.split(',').length > 64
         ) {
           colProp.dt = 'text';
         }
@@ -997,7 +1046,7 @@ export class MysqlUi {
         colProp.dt = 'varchar';
         break;
       case 'Date':
-        colProp.dt = 'varchar';
+        colProp.dt = 'date';
 
         break;
       case 'Year':
@@ -1069,11 +1118,11 @@ export class MysqlUi {
       case 'DateTime':
         colProp.dt = 'datetime';
         break;
-      case 'CreateTime':
-        colProp.dt = 'datetime';
+      case 'CreatedTime':
+        colProp.dt = 'timestamp';
         break;
       case 'LastModifiedTime':
-        colProp.dt = 'datetime';
+        colProp.dt = 'timestamp';
         break;
       case 'AutoNumber':
         colProp.dt = 'int';
@@ -1259,7 +1308,7 @@ export class MysqlUi {
         return ['date', 'datetime', 'timestamp', 'varchar'];
 
       case 'DateTime':
-      case 'CreateTime':
+      case 'CreatedTime':
       case 'LastModifiedTime':
         return ['datetime', 'timestamp', 'varchar'];
 
@@ -1287,8 +1336,6 @@ export class MysqlUi {
   }
 
   static getUnsupportedFnList() {
-    return [];
+    return ['COUNTA', 'COUNT', 'DATESTR'];
   }
 }
-
-// module.exports = MysqlUiHelp;

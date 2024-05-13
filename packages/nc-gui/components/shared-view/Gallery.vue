@@ -1,7 +1,20 @@
-<script setup lang="ts">
-import { ActiveViewInj, FieldsInj, IsPublicInj, MetaInj, ReadonlyInj, ReloadViewDataHookInj } from '#imports'
+<script lang="ts" setup>
+import {
+  ActiveViewInj,
+  FieldsInj,
+  IsPublicInj,
+  MetaInj,
+  ReadonlyInj,
+  ReloadViewDataHookInj,
+  createEventHook,
+  provide,
+  useProvideKanbanViewStore,
+  useProvideSmartsheetStore,
+  useProvideViewColumns,
+  useSharedView,
+} from '#imports'
 
-const { sharedView, meta, sorts, nestedFilters } = useSharedView()
+const { sharedView, meta, nestedFilters } = useSharedView()
 
 const reloadEventHook = createEventHook()
 
@@ -17,7 +30,13 @@ provide(FieldsInj, ref(meta.value?.columns || []))
 
 provide(IsPublicInj, ref(true))
 
-useProvideSmartsheetStore(sharedView, meta, true, sorts, nestedFilters)
+useProvideViewColumns(sharedView, meta, () => reloadEventHook?.trigger(), true)
+
+useProvideSmartsheetLtarHelpers(meta)
+
+useProvideSmartsheetStore(sharedView, meta, true, ref([]), nestedFilters)
+
+useProvideKanbanViewStore(meta, sharedView)
 </script>
 
 <template>

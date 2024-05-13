@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ComputedRef } from 'vue'
 import JsBarcodeWrapper from './JsBarcodeWrapper.vue'
-import { RowHeightInj } from '#imports'
+import { RowHeightInj, computed, inject, ref, rowHeightInPx } from '#imports'
 
 const maxNumberOfAllowedCharsForBarcodeValue = 100
 
@@ -15,11 +15,13 @@ const tooManyCharsForBarcode = computed(() => barcodeValue.value.length > maxNum
 
 const modalVisible = ref(false)
 
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))
+
 const showBarcodeModal = () => {
   modalVisible.value = true
 }
 
-const barcodeMeta = $computed(() => {
+const barcodeMeta = computed(() => {
   return {
     barcodeFormat: 'CODE128',
     ...parseProp(column?.value?.meta),
@@ -32,10 +34,7 @@ const showBarcode = computed(() => barcodeValue?.value.length > 0 && !tooManyCha
 
 const { showEditNonEditableFieldWarning, showClearNonEditableFieldWarning } = useShowNotEditableWarning()
 
-const rowHeight = inject(
-  RowHeightInj,
-  computed(() => undefined),
-)
+const rowHeight = inject(RowHeightInj, ref(undefined))
 </script>
 
 <template>
@@ -47,41 +46,67 @@ const rowHeight = inject(
     :footer="null"
     @ok="handleModalOkClick"
   >
-    <JsBarcodeWrapper v-if="showBarcode" :barcode-value="barcodeValue" :barcode-format="barcodeMeta.barcodeFormat" />
+    <JsBarcodeWrapper
+      v-if="showBarcode"
+      :barcode-value="barcodeValue"
+      :barcode-format="barcodeMeta.barcodeFormat"
+      show-download
+    />
   </a-modal>
-  <JsBarcodeWrapper
-    v-if="showBarcode && rowHeight"
-    :barcode-value="barcodeValue"
-    :barcode-format="barcodeMeta.barcodeFormat"
-    :custom-style="{ height: rowHeight ? `${rowHeight * 1.4}rem` : `1.4rem` }"
-    @on-click-barcode="showBarcodeModal"
+  <div
+    v-if="!tooManyCharsForBarcode"
+    class="flex w-full items-center barcode-wrapper"
+    :class="{
+      'justify-start ml-2': isExpandedFormOpen,
+      'justify-center': !isExpandedFormOpen,
+    }"
   >
-    <template #barcodeRenderError>
-      <div class="text-left text-wrap mt-2 text-[#e65100] text-xs" data-testid="barcode-invalid-input-message">
-        {{ $t('msg.warning.barcode.renderError') }}
-      </div>
-    </template>
-  </JsBarcodeWrapper>
-  <JsBarcodeWrapper
-    v-else-if="showBarcode"
-    :barcode-value="barcodeValue"
-    :barcode-format="barcodeMeta.barcodeFormat"
-    @on-click-barcode="showBarcodeModal"
-  >
-    <template #barcodeRenderError>
-      <div class="text-left text-wrap mt-2 text-[#e65100] text-xs" data-testid="barcode-invalid-input-message">
-        {{ $t('msg.warning.barcode.renderError') }}
-      </div>
-    </template>
-  </JsBarcodeWrapper>
+    <JsBarcodeWrapper
+      v-if="showBarcode && rowHeight"
+      :barcode-value="barcodeValue"
+      tabindex="-1"
+      :barcode-format="barcodeMeta.barcodeFormat"
+      :custom-style="{
+        height: rowHeight ? `${rowHeight === 1 ? rowHeightInPx['1'] - 4 : rowHeightInPx[`${rowHeight}`] - 20}px` : `1.8rem`,
+      }"
+      @on-click-barcode="showBarcodeModal"
+    >
+      <template #barcodeRenderError>
+        <div class="text-left text-wrap mt-2 text-[#e65100] text-xs" data-testid="barcode-invalid-input-message">
+          {{ $t('msg.warning.barcode.renderError') }}
+        </div>
+      </template>
+    </JsBarcodeWrapper>
+    <JsBarcodeWrapper
+      v-else-if="showBarcode"
+      tabindex="-1"
+      :barcode-value="barcodeValue"
+      :barcode-format="barcodeMeta.barcodeFormat"
+      @on-click-barcode="showBarcodeModal"
+    >
+      <template #barcodeRenderError>
+        <div class="text-left text-wrap mt-2 text-[#e65100] text-xs" data-testid="barcode-invalid-input-message">
+          {{ $t('msg.warning.barcode.renderError') }}
+        </div>
+      </template>
+    </JsBarcodeWrapper>
+  </div>
 
-  <div v-if="tooManyCharsForBarcode" class="text-left text-wrap mt-2 text-[#e65100] text-xs">
+  <div v-if="tooManyCharsForBarcode" class="nc-cell-field text-left text-wrap text-[#e65100] text-xs">
     {{ $t('labels.barcodeValueTooLong') }}
   </div>
-  <div v-if="showEditNonEditableFieldWarning" class="text-left text-wrap mt-2 text-[#e65100] text-xs">
+  <div v-if="showEditNonEditableFieldWarning" class="nc-cell-field text-left text-wrap mt-2 text-[#e65100] text-xs">
     {{ $t('msg.warning.nonEditableFields.computedFieldUnableToClear') }}
   </div>
-  <div v-if="showClearNonEditableFieldWarning" class="text-left text-wrap mt-2 text-[#e65100] text-xs">
+  <div v-if="showClearNonEditableFieldWarning" class="nc-cell-field text-left text-wrap mt-2 text-[#e65100] text-xs">
     {{ $t('msg.warning.nonEditableFields.barcodeFieldsCannotBeDirectlyChanged') }}
   </div>
 </template>
+
+<style lang="scss" scoped>
+.barcode-wrapper {
+  & > div {
+    @apply max-w-8.2rem;
+  }
+}
+</style>

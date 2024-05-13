@@ -1,15 +1,18 @@
 <script lang="ts" setup>
-import { onUnmounted } from '@vue/runtime-core'
 import { message } from 'ant-design-vue'
 import tinycolor from 'tinycolor2'
 import type { Select as AntSelect } from 'ant-design-vue'
 import type { SelectOptionType, SelectOptionsType } from 'nocodb-sdk'
+import type { FormFieldsLimitOptionsType } from '~/lib'
 import {
   ActiveCellInj,
-  CellClickHookInj,
   ColumnInj,
+  EditColumnInj,
+  EditModeInj,
   IsKanbanInj,
+  IsSurveyFormInj,
   ReadonlyInj,
+  RowHeightInj,
   computed,
   enumColor,
   extractSdkResponseErrorMsg,
@@ -20,9 +23,10 @@ import {
   onMounted,
   reactive,
   ref,
+  rowHeightTruncateLines,
+  useBase,
   useEventListener,
   useMetas,
-  useProject,
   useRoles,
   useSelectedCellKeyupListener,
   watch,
@@ -40,23 +44,37 @@ const { modelValue, disableOptionCreation } = defineProps<Props>()
 
 const emit = defineEmits(['update:modelValue'])
 
+const { isMobileMode } = useGlobal()
+
 const column = inject(ColumnInj)!
 
 const readOnly = inject(ReadonlyInj)!
 
-const active = inject(ActiveCellInj, ref(false))
+const isEditable = inject(EditModeInj, ref(false))
 
-const editable = inject(EditModeInj, ref(false))
+const activeCell = inject(ActiveCellInj, ref(false))
+
+const isForm = inject(IsFormInj, ref(false))
+
+// use both ActiveCellInj or EditModeInj to determine the active state
+// since active will be false in case of form view
+const active = computed(() => activeCell.value || isEditable.value || isForm.value)
 
 const isPublic = inject(IsPublicInj, ref(false))
 
-const isForm = inject(IsFormInj, ref(false))
+const isEditColumn = inject(EditColumnInj, ref(false))
+
+const rowHeight = inject(RowHeightInj, ref(undefined))
+
+const isSurveyForm = inject(IsSurveyFormInj, ref(false))
 
 const selectedIds = ref<string[]>([])
 
 const aselect = ref<typeof AntSelect>()
 
 const isOpen = ref(false)
+
+const isFocusing = ref(false)
 
 const isKanban = inject(IsKanbanInj, ref(false))
 
@@ -66,9 +84,9 @@ const { $api } = useNuxtApp()
 
 const { getMeta } = useMetas()
 
-const { hasRole } = useRoles()
+const { isUIAllowed } = useRoles()
 
-const { isPg, isMysql } = useProject()
+const { isPg, isMysql } = useBase()
 
 // a variable to keep newly created options value
 // temporary until it's add the option to column meta
@@ -82,7 +100,43 @@ const options = computed<(SelectOptionType & { value?: string })[]>(() => {
     for (const op of opts.filter((el: SelectOptionType) => el.order === null)) {
       op.title = op.title?.replace(/^'/, '').replace(/'$/, '')
     }
-    return opts.map((o: SelectOptionType) => ({ ...o, value: o.title }))
+    let order = 1
+    const limitOptionsById =
+      ((parseProp(column.value.meta)?.limitOptions || []).reduce(
+        (o: Record<string, FormFieldsLimitOptionsType>, f: FormFieldsLimitOptionsType) => {
+          if (order < (f?.order ?? 0)) {
+            order = f.order
+          }
+          return {
+            ...o,
+            [f.id]: f,
+          }
+        },
+        {},
+      ) as Record<string, FormFieldsLimitOptionsType>) ?? {}
+
+    if (
+      !isEditColumn.value &&
+      isForm.value &&
+      parseProp(column.value.meta)?.isLimitOption &&
+      (parseProp(column.value.meta)?.limitOptions || []).length
+    ) {
+      return opts
+        .filter((o: SelectOptionType) => {
+          if (limitOptionsById[o.id!]?.show !== undefined) {
+            return limitOptionsById[o.id!]?.show
+          }
+          return false
+        })
+        .map((o) => ({
+          ...o,
+          value: o.title,
+          order: o.id && limitOptionsById[o.id] ? limitOptionsById[o.id]?.order : order++,
+        }))
+        .sort((a, b) => a.order - b.order)
+    } else {
+      return opts.map((o: SelectOptionType) => ({ ...o, value: o.title }))
+    }
   }
   return []
 })
@@ -91,9 +145,9 @@ const isOptionMissing = computed(() => {
   return (options.value ?? []).every((op) => op.title !== searchVal.value)
 })
 
-const hasEditRoles = computed(() => hasRole('owner', true) || hasRole('creator', true) || hasRole('editor', true))
+const hasEditRoles = computed(() => isUIAllowed('dataEdit'))
 
-const editAllowed = computed(() => (hasEditRoles.value || isForm.value) && (active.value || editable.value))
+const editAllowed = computed(() => (hasEditRoles.value || isForm.value) && active.value)
 
 const vModel = computed({
   get: () => {
@@ -119,9 +173,13 @@ const vModel = computed({
 
 const selectedTitles = computed(() =>
   modelValue
-    ? typeof modelValue === 'string'
-      ? isMysql(column.value.base_id)
-        ? modelValue.split(',').sort((a, b) => {
+    ? Array.isArray(modelValue)
+      ? modelValue
+      : isMysql(column.value.source_id)
+      ? modelValue
+          .toString()
+          .split(',')
+          .sort((a, b) => {
             const opa = options.value.find((el) => el.title === a)
             const opb = options.value.find((el) => el.title === b)
             if (opa && opb) {
@@ -129,14 +187,13 @@ const selectedTitles = computed(() =>
             }
             return 0
           })
-        : modelValue.split(',')
-      : modelValue
+      : modelValue.toString().split(',')
     : [],
 )
 
 onMounted(() => {
   selectedIds.value = selectedTitles.value.flatMap((el) => {
-    const item = options.value.find((op) => op.title === el)
+    const item = options.value.find((op) => op.title === el || op.title === el?.trim())
     const itemIdOrTitle = item?.id || item?.title
     if (itemIdOrTitle) {
       return [itemIdOrTitle]
@@ -150,7 +207,7 @@ watch(
   () => modelValue,
   () => {
     selectedIds.value = selectedTitles.value.flatMap((el) => {
-      const item = options.value.find((op) => op.title === el)
+      const item = options.value.find((op) => op.title === el || op.title === el?.trim())
       if (item && (item.id || item.title)) {
         return [(item.id || item.title)!]
       }
@@ -164,15 +221,13 @@ watch(isOpen, (n, _o) => {
   if (!n) searchVal.value = ''
 
   if (editAllowed.value) {
-    if (!n) {
-      aselect.value?.$el?.querySelector('input')?.blur()
-    } else {
+    if (n) {
       aselect.value?.$el?.querySelector('input')?.focus()
     }
   }
 })
 
-useSelectedCellKeyupListener(active, (e) => {
+useSelectedCellKeyupListener(activeCell, (e) => {
   switch (e.key) {
     case 'Escape':
       isOpen.value = false
@@ -234,7 +289,7 @@ async function addIfMissingAndSave() {
       // todo: refactor and avoid repetition
       if (updatedColMeta.cdf) {
         // Postgres returns default value wrapped with single quotes & casted with type so we have to get value between single quotes to keep it unified for all databases
-        if (isPg(column.value.base_id)) {
+        if (isPg(column.value.source_id)) {
           updatedColMeta.cdf = updatedColMeta.cdf.substring(
             updatedColMeta.cdf.indexOf(`'`) + 1,
             updatedColMeta.cdf.lastIndexOf(`'`),
@@ -242,7 +297,7 @@ async function addIfMissingAndSave() {
         }
 
         // Mysql escapes single quotes with backslash so we keep quotes but others have to unescaped
-        if (!isMysql(column.value.base_id)) {
+        if (!isMysql(column.value.source_id) && !isPg(column.value.source_id)) {
           updatedColMeta.cdf = updatedColMeta.cdf.replace(/''/g, "'")
         }
       }
@@ -283,22 +338,11 @@ const onTagClick = (e: Event, onClose: Function) => {
   }
 }
 
-const cellClickHook = inject(CellClickHookInj, null)
-
 const toggleMenu = () => {
-  if (cellClickHook) return
-  isOpen.value = editAllowed.value && !isOpen.value
-}
+  if (isFocusing.value) return
 
-const cellClickHookHandler = () => {
   isOpen.value = editAllowed.value && !isOpen.value
 }
-onMounted(() => {
-  cellClickHook?.on(cellClickHookHandler)
-})
-onUnmounted(() => {
-  cellClickHook?.on(cellClickHookHandler)
-})
 
 const handleClose = (e: MouseEvent) => {
   // close dropdown if clicked outside of dropdown
@@ -308,6 +352,8 @@ const handleClose = (e: MouseEvent) => {
     !aselect.value.$el.contains(e.target) &&
     !document.querySelector('.nc-dropdown-multi-select-cell.active')?.contains(e.target as Node)
   ) {
+    // loose focus when clicked outside
+    isEditable.value = false
     isOpen.value = false
   }
 }
@@ -315,125 +361,238 @@ const handleClose = (e: MouseEvent) => {
 useEventListener(document, 'click', handleClose, true)
 
 const selectedOpts = computed(() => {
-  return options.value.reduce<(SelectOptionType & { index: number })[]>((selectedOptions, option) => {
-    const index = vModel.value.indexOf(option.value!)
-    if (index !== -1) {
-      selectedOptions.push({ ...option, index })
+  return vModel.value.reduce<SelectOptionType[]>((selectedOptions, option) => {
+    const selectedOption = options.value.find((o) => o.value === option)
+    if (selectedOption) {
+      selectedOptions.push(selectedOption)
     }
     return selectedOptions
   }, [])
 })
+
+const onKeyDown = (e: KeyboardEvent) => {
+  // Tab
+  if (e.key === 'Tab') {
+    isOpen.value = false
+    return
+  } else if (e.key === 'Escape' && isForm.value) {
+    isOpen.value = false
+    return
+  }
+
+  e.stopPropagation()
+}
+
+const onFocus = () => {
+  isFocusing.value = true
+
+  setTimeout(() => {
+    isFocusing.value = false
+  }, 250)
+
+  if (isSurveyForm.value && vModel.value?.length) return
+
+  isOpen.value = true
+}
 </script>
 
 <template>
-  <div class="nc-multi-select h-full w-full flex items-center" :class="{ 'read-only': readOnly }" @click="toggleMenu">
-    <div v-if="!editable && !active" class="flex flex-nowrap">
-      <template v-for="selectedOpt of selectedOpts" :key="selectedOpt.value">
-        <a-tag class="rounded-tag" :color="selectedOpt.color" :style="{ order: selectedOpt.index }">
-          <span
-            :style="{
-              'color': tinycolor.isReadable(selectedOpt.color || '#ccc', '#fff', { level: 'AA', size: 'large' })
-                ? '#fff'
-                : tinycolor.mostReadable(selectedOpt.color || '#ccc', ['#0b1d05', '#fff']).toHex8String(),
-              'font-size': '13px',
-            }"
-            :class="{ 'text-sm': isKanban }"
-          >
-            {{ selectedOpt.title }}
-          </span>
-        </a-tag>
-      </template>
-    </div>
-
-    <a-select
-      v-else
-      ref="aselect"
-      v-model:value="vModel"
-      mode="multiple"
-      class="w-full overflow-hidden"
-      :bordered="false"
-      clear-icon
-      show-search
-      :show-arrow="editAllowed && !readOnly"
-      :open="isOpen && editAllowed"
-      :disabled="readOnly || !editAllowed"
-      :class="{ 'caret-transparent': !hasEditRoles }"
-      :dropdown-class-name="`nc-dropdown-multi-select-cell ${isOpen ? 'active' : ''}`"
-      @search="search"
-      @keydown.stop
-    >
-      <a-select-option
-        v-for="op of options"
-        :key="op.id || op.title"
-        :value="op.title"
-        :data-testid="`select-option-${column.title}-${location === 'filter' ? 'filter' : rowIndex}`"
-        :class="`nc-select-option-${column.title}-${op.title}`"
-        @click.stop
-      >
-        <a-tag class="rounded-tag" :color="op.color">
-          <span
-            :style="{
-              'color': tinycolor.isReadable(op.color || '#ccc', '#fff', { level: 'AA', size: 'large' })
-                ? '#fff'
-                : tinycolor.mostReadable(op.color || '#ccc', ['#0b1d05', '#fff']).toHex8String(),
-              'font-size': '13px',
-            }"
-            :class="{ 'text-sm': isKanban }"
-          >
-            {{ op.title }}
-          </span>
-        </a-tag>
-      </a-select-option>
-
-      <a-select-option
-        v-if="
-          searchVal &&
-          isOptionMissing &&
-          !isPublic &&
-          !disableOptionCreation &&
-          (hasRole('owner', true) || hasRole('creator', true))
-        "
-        :key="searchVal"
-        :value="searchVal"
-      >
-        <div class="flex gap-2 text-gray-500 items-center h-full">
-          <component :is="iconMap.plusThick" class="min-w-4" />
-          <div class="text-xs whitespace-normal">
-            Create new option named <strong>{{ searchVal }}</strong>
-          </div>
-        </div>
-      </a-select-option>
-
-      <template #tagRender="{ value: val, onClose }">
-        <a-tag
-          v-if="options.find((el) => el.title === val)"
-          class="rounded-tag nc-selected-option"
-          :style="{ display: 'flex', alignItems: 'center' }"
-          :color="options.find((el) => el.title === val)?.color"
-          :closable="editAllowed && (vModel.length > 1 || !column?.rqd)"
-          :close-icon="h(MdiCloseCircle, { class: ['ms-close-icon'] })"
-          @click="onTagClick($event, onClose)"
-          @close="onClose"
+  <div
+    class="nc-cell-field nc-multi-select h-full w-full flex items-center"
+    :class="{ 'read-only': readOnly, 'max-w-full': isForm }"
+    @click="toggleMenu"
+  >
+    <div v-if="!isEditColumn && isForm && parseProp(column.meta)?.isList" class="w-full max-w-full">
+      <a-checkbox-group v-model:value="vModel" :disabled="readOnly || !editAllowed" class="nc-field-layout-list" @click.stop>
+        <a-checkbox
+          v-for="op of options"
+          :key="op.title"
+          :value="op.title"
+          :data-testid="`select-option-${column.title}-${location === 'filter' ? 'filter' : rowIndex}`"
+          :class="`nc-select-option-${column.title}-${op.title}`"
         >
-          <span
-            :style="{
-              'color': tinycolor.isReadable(options.find((el) => el.title === val)?.color || '#ccc', '#fff', {
-                level: 'AA',
-                size: 'large',
-              })
-                ? '#fff'
-                : tinycolor
-                    .mostReadable(options.find((el) => el.title === val)?.color || '#ccc', ['#0b1d05', '#fff'])
-                    .toHex8String(),
-              'font-size': '13px',
+          <a-tag class="rounded-tag max-w-full" :color="op.color">
+            <span
+              :style="{
+                color: tinycolor.isReadable(op.color || '#ccc', '#fff', { level: 'AA', size: 'large' })
+                  ? '#fff'
+                  : tinycolor.mostReadable(op.color || '#ccc', ['#0b1d05', '#fff']).toHex8String(),
+              }"
+              class="text-small"
+            >
+              <NcTooltip class="truncate max-w-full" show-on-truncate-only>
+                <template #title>
+                  {{ op.title }}
+                </template>
+                <span
+                  class="text-ellipsis overflow-hidden"
+                  :style="{
+                    wordBreak: 'keep-all',
+                    whiteSpace: 'nowrap',
+                    display: 'inline',
+                  }"
+                >
+                  {{ op.title }}
+                </span>
+              </NcTooltip>
+            </span>
+          </a-tag>
+        </a-checkbox>
+      </a-checkbox-group>
+    </div>
+    <template v-else>
+      <div
+        v-if="!active"
+        class="flex flex-wrap"
+        :style="{
+          'display': '-webkit-box',
+          'max-width': '100%',
+          '-webkit-line-clamp': rowHeightTruncateLines(rowHeight),
+          '-webkit-box-orient': 'vertical',
+          'overflow': 'hidden',
+        }"
+      >
+        <template v-for="selectedOpt of selectedOpts" :key="selectedOpt.value">
+          <a-tag
+            class="rounded-tag max-w-full"
+            :class="{
+              '!my-0': !rowHeight || rowHeight === 1,
             }"
-            :class="{ 'text-sm': isKanban }"
+            :color="selectedOpt.color"
           >
-            {{ val }}
-          </span>
-        </a-tag>
-      </template>
-    </a-select>
+            <span
+              :style="{
+                color: tinycolor.isReadable(selectedOpt.color || '#ccc', '#fff', { level: 'AA', size: 'large' })
+                  ? '#fff'
+                  : tinycolor.mostReadable(selectedOpt.color || '#ccc', ['#0b1d05', '#fff']).toHex8String(),
+              }"
+              :class="{ 'text-sm': isKanban, 'text-small': !isKanban }"
+            >
+              <NcTooltip class="truncate max-w-full" show-on-truncate-only>
+                <template #title>
+                  {{ selectedOpt.title }}
+                </template>
+                <span
+                  class="text-ellipsis overflow-hidden"
+                  :style="{
+                    wordBreak: 'keep-all',
+                    whiteSpace: 'nowrap',
+                    display: 'inline',
+                  }"
+                >
+                  {{ selectedOpt.title }}
+                </span>
+              </NcTooltip>
+            </span>
+          </a-tag>
+        </template>
+      </div>
+
+      <a-select
+        v-else
+        ref="aselect"
+        v-model:value="vModel"
+        mode="multiple"
+        class="w-full overflow-hidden"
+        :placeholder="isEditColumn ? $t('labels.optional') : ''"
+        :bordered="false"
+        clear-icon
+        :show-search="!isMobileMode"
+        :show-arrow="editAllowed && !readOnly"
+        :open="isOpen && editAllowed"
+        :disabled="readOnly || !editAllowed"
+        :class="{ 'caret-transparent': !hasEditRoles }"
+        :dropdown-class-name="`nc-dropdown-multi-select-cell !min-w-156px ${isOpen ? 'active' : ''}`"
+        @search="search"
+        @keydown="onKeyDown"
+        @focus="onFocus"
+        @blur="isOpen = false"
+      >
+        <template #suffixIcon>
+          <GeneralIcon icon="arrowDown" class="text-gray-700 nc-select-expand-btn" />
+        </template>
+        <a-select-option
+          v-for="op of options"
+          :key="op.id || op.title"
+          :value="op.title"
+          :data-testid="`select-option-${column.title}-${location === 'filter' ? 'filter' : rowIndex}`"
+          :class="`nc-select-option-${column.title}-${op.title}`"
+          @click.stop
+        >
+          <a-tag class="rounded-tag max-w-full" :color="op.color">
+            <span
+              :style="{
+                color: tinycolor.isReadable(op.color || '#ccc', '#fff', { level: 'AA', size: 'large' })
+                  ? '#fff'
+                  : tinycolor.mostReadable(op.color || '#ccc', ['#0b1d05', '#fff']).toHex8String(),
+              }"
+              :class="{ 'text-sm': isKanban, 'text-small': !isKanban }"
+            >
+              <NcTooltip class="truncate max-w-full" show-on-truncate-only>
+                <template #title>
+                  {{ op.title }}
+                </template>
+                <span
+                  class="text-ellipsis overflow-hidden"
+                  :style="{
+                    wordBreak: 'keep-all',
+                    whiteSpace: 'nowrap',
+                    display: 'inline',
+                  }"
+                >
+                  {{ op.title }}
+                </span>
+              </NcTooltip>
+            </span>
+          </a-tag>
+        </a-select-option>
+
+        <a-select-option
+          v-if="searchVal && isOptionMissing && !isPublic && !disableOptionCreation && isUIAllowed('fieldEdit')"
+          :key="searchVal"
+          :value="searchVal"
+        >
+          <div class="flex gap-2 text-gray-500 items-center h-full">
+            <component :is="iconMap.plusThick" class="min-w-4" />
+            <div class="text-xs whitespace-normal">
+              {{ $t('msg.selectOption.createNewOptionNamed') }} <strong>{{ searchVal }}</strong>
+            </div>
+          </div>
+        </a-select-option>
+
+        <template #tagRender="{ value: val, onClose }">
+          <a-tag
+            v-if="options.find((el) => el.title === val)"
+            class="rounded-tag nc-selected-option"
+            :class="{
+              '!my-0': !rowHeight || rowHeight === 1,
+            }"
+            :style="{ display: 'flex', alignItems: 'center' }"
+            :color="options.find((el) => el.title === val)?.color"
+            :closable="editAllowed && (vModel.length > 1 || !column?.rqd)"
+            :close-icon="h(MdiCloseCircle, { class: ['ms-close-icon'] })"
+            @click="onTagClick($event, onClose)"
+            @close="onClose"
+          >
+            <span
+              :style="{
+                color: tinycolor.isReadable(options.find((el) => el.title === val)?.color || '#ccc', '#fff', {
+                  level: 'AA',
+                  size: 'large',
+                })
+                  ? '#fff'
+                  : tinycolor
+                      .mostReadable(options.find((el) => el.title === val)?.color || '#ccc', ['#0b1d05', '#fff'])
+                      .toHex8String(),
+              }"
+              :class="{ 'text-sm': isKanban, 'text-small': !isKanban }"
+            >
+              {{ val }}
+            </span>
+          </a-tag>
+        </template>
+      </a-select>
+    </template>
   </div>
 </template>
 
@@ -463,12 +622,18 @@ const selectedOpts = computed(() => {
   color: rgba(0, 0, 0, 0.45);
 }
 
+.read-only {
+  .ms-close-icon {
+    display: none;
+  }
+}
+
 .rounded-tag {
-  @apply py-0 px-[12px] rounded-[12px];
+  @apply py-[0.5px] px-2 rounded-[12px];
 }
 
 :deep(.ant-tag) {
-  @apply "rounded-tag" my-[2px];
+  @apply "rounded-tag" my-[1px];
 }
 
 :deep(.ant-tag-close-icon) {
@@ -480,7 +645,7 @@ const selectedOpts = computed(() => {
 }
 
 :deep(.ant-select-selection-overflow) {
-  @apply flex-nowrap overflow-hidden;
+  @apply flex-nowrap overflow-hidden max-w-[fit-content];
 }
 
 .nc-multi-select:not(.read-only) {
@@ -491,10 +656,17 @@ const selectedOpts = computed(() => {
 }
 
 :deep(.ant-select-selector) {
-  @apply !px-0;
+  @apply !pl-0 flex-nowrap;
 }
 
 :deep(.ant-select-selection-search-input) {
   @apply !text-xs;
+}
+</style>
+
+<style lang="scss">
+.ant-select-item-option-content,
+.ant-select-item-option-state {
+  @apply !flex !items-center;
 }
 </style>

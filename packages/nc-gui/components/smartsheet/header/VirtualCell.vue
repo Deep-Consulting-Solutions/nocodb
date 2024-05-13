@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import type { ColumnReqType, ColumnType, FormulaType, LinkToAnotherRecordType, LookupType, RollupType } from 'nocodb-sdk'
-import { substituteColumnIdWithAliasInFormula } from 'nocodb-sdk'
+import {
+  type ColumnReqType,
+  type ColumnType,
+  type FormulaType,
+  type LinkToAnotherRecordType,
+  type LookupType,
+  type RollupType,
+  isLinksOrLTAR,
+} from 'nocodb-sdk'
+import { RelationTypes, UITypes, UITypesName, substituteColumnIdWithAliasInFormula } from 'nocodb-sdk'
 import {
   ColumnInj,
   IsFormInj,
@@ -12,6 +20,7 @@ import {
   isHm,
   isLookup,
   isMm,
+  isOo,
   isRollup,
   isVirtualColRequired,
   provide,
@@ -19,10 +28,10 @@ import {
   toRef,
   useI18n,
   useMetas,
-  useUIPermission,
+  useRoles,
 } from '#imports'
 
-const props = defineProps<{ column: ColumnType; hideMenu?: boolean; required?: boolean | number }>()
+const props = defineProps<{ column: ColumnType; hideMenu?: boolean; required?: boolean | number; hideIcon?: boolean }>()
 
 const { t } = useI18n()
 
@@ -30,24 +39,34 @@ const column = toRef(props, 'column')
 
 const hideMenu = toRef(props, 'hideMenu')
 
+const { isMobileMode } = useGlobal()
+
 const editColumnDropdown = ref(false)
+
+const isDropDownOpen = ref(false)
+
+const isLocked = inject(IsLockedInj, ref(false))
 
 provide(ColumnInj, column)
 
 const { metas } = useMetas()
 
-const { isUIAllowed } = useUIPermission()
+const { isUIAllowed } = useRoles()
 
 const meta = inject(MetaInj, ref())
 
+const isGrid = inject(IsGridInj, ref(false))
+
 const isForm = inject(IsFormInj, ref(false))
 
-const colOptions = $computed(() => column.value?.colOptions)
+const isExpandedForm = inject(IsExpandedFormOpenInj, ref(false))
 
-const tableTile = $computed(() => meta?.value?.title)
+const colOptions = computed(() => column.value?.colOptions)
 
-const relationColumnOptions = $computed<LinkToAnotherRecordType | null>(() => {
-  if (isMm(column.value) || isHm(column.value) || isBt(column.value)) {
+const tableTile = computed(() => meta?.value?.title)
+
+const relationColumnOptions = computed<LinkToAnotherRecordType | null>(() => {
+  if (isLinksOrLTAR(column.value)) {
     return column.value?.colOptions as LinkToAnotherRecordType
   } else if ((column?.value?.colOptions as LookupType | RollupType)?.fk_relation_column_id) {
     return meta?.value?.columns?.find(
@@ -57,19 +76,24 @@ const relationColumnOptions = $computed<LinkToAnotherRecordType | null>(() => {
   return null
 })
 
-const relatedTableMeta = $computed(
-  () => relationColumnOptions?.fk_related_model_id && metas.value?.[relationColumnOptions?.fk_related_model_id as string],
+const relatedTableMeta = computed(
+  () =>
+    relationColumnOptions.value?.fk_related_model_id && metas.value?.[relationColumnOptions.value?.fk_related_model_id as string],
 )
 
-const relatedTableTitle = $computed(() => relatedTableMeta?.title)
+const relatedTableTitle = computed(() => relatedTableMeta.value?.title)
 
-const childColumn = $computed(() => {
-  if (relatedTableMeta?.columns) {
+const childColumn = computed(() => {
+  if (relatedTableMeta.value?.columns) {
     if (isRollup(column.value)) {
-      return relatedTableMeta?.columns.find((c: ColumnType) => c.id === (colOptions as RollupType).fk_rollup_column_id)
+      return relatedTableMeta.value?.columns.find(
+        (c: ColumnType) => c.id === (colOptions.value as RollupType).fk_rollup_column_id,
+      )
     }
     if (isLookup(column.value)) {
-      return relatedTableMeta?.columns.find((c: ColumnType) => c.id === (colOptions as LookupType).fk_lookup_column_id)
+      return relatedTableMeta.value?.columns.find(
+        (c: ColumnType) => c.id === (colOptions.value as LookupType).fk_lookup_column_id,
+      )
     }
   }
   return ''
@@ -79,14 +103,17 @@ const tooltipMsg = computed(() => {
   if (!column.value) {
     return ''
   }
+
   if (isHm(column.value)) {
-    return `'${tableTile}' ${t('labels.hasMany')} '${relatedTableTitle}'`
+    return `'${tableTile.value}' ${t('labels.hasMany')} '${relatedTableTitle.value}'`
   } else if (isMm(column.value)) {
-    return `'${tableTile}' & '${relatedTableTitle}' ${t('labels.manyToMany')}`
+    return `'${tableTile.value}' & '${relatedTableTitle.value}' ${t('labels.manyToMany')}`
   } else if (isBt(column.value)) {
-    return `'${column?.value?.title}' ${t('labels.belongsTo')} '${relatedTableTitle}'`
+    return `'${column?.value?.title}' ${t('labels.belongsTo')} '${relatedTableTitle.value}'`
+  } else if (isOo(column.value)) {
+    return `'${tableTile.value}' & '${relatedTableTitle.value}' ${t('labels.oneToOne')}`
   } else if (isLookup(column.value)) {
-    return `'${childColumn.title}' from '${relatedTableTitle}' (${childColumn.uidt})`
+    return `'${childColumn.value.title}' from '${relatedTableTitle.value}' (${childColumn.value.uidt})`
   } else if (isFormula(column.value)) {
     const formula = substituteColumnIdWithAliasInFormula(
       (column.value?.colOptions as FormulaType)?.formula,
@@ -95,14 +122,29 @@ const tooltipMsg = computed(() => {
     )
     return `Formula - ${formula}`
   } else if (isRollup(column.value)) {
-    return `'${childColumn.title}' of '${relatedTableTitle}' (${childColumn.uidt})`
+    return `'${childColumn.value.title}' of '${relatedTableTitle.value}' (${childColumn.value.uidt})`
   }
-  return ''
+  return column?.value?.title || ''
+})
+
+const showTooltipAlways = computed(() => {
+  return isLinksOrLTAR(column.value) || isFormula(column.value) || isRollup(column.value) || isLookup(column.value)
 })
 
 const columnOrder = ref<Pick<ColumnReqType, 'column_order'> | null>(null)
 
-const addField = async (payload) => {
+const columnTypeName = computed(() => {
+  if (column.value.uidt === UITypes.LongText && parseProp(column?.value?.meta)?.richMode) {
+    return UITypesName.RichText
+  }
+  if (column.value.uidt === UITypes.LinkToAnotherRecord && column.value.colOptions?.type === RelationTypes.ONE_TO_ONE) {
+    return UITypesName[UITypes.Links]
+  }
+
+  return column.value.uidt ? UITypesName[column.value.uidt] : ''
+})
+
+const addField = async (payload: any) => {
   columnOrder.value = payload
   editColumnDropdown.value = true
 }
@@ -111,18 +153,48 @@ const closeAddColumnDropdown = () => {
   columnOrder.value = null
   editColumnDropdown.value = false
 }
+
+const openHeaderMenu = () => {
+  if (isLocked.value) return
+
+  if (!isForm.value && !isExpandedForm.value && isUIAllowed('fieldEdit') && !isMobileMode.value) {
+    editColumnDropdown.value = true
+  }
+}
+
+const openDropDown = (e: Event) => {
+  if (isLocked.value) return
+
+  if (isForm.value || isExpandedForm.value || (!isUIAllowed('fieldEdit') && !isMobileMode.value)) return
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  isDropDownOpen.value = !isDropDownOpen.value
+}
 </script>
 
 <template>
-  <div class="flex items-center w-full text-xs text-gray-500 font-weight-medium" :class="{ 'h-full': column }">
-    <LazySmartsheetHeaderVirtualCellIcon v-if="column" />
-
-    <a-tooltip placement="bottom">
+  <div
+    class="flex items-center w-full h-full text-small text-gray-500 font-weight-medium"
+    @dblclick="openHeaderMenu"
+    @click.right="openDropDown"
+  >
+    <template v-if="column && !props.hideIcon">
+      <NcTooltip v-if="isGrid && !isExpandedForm" class="flex items-center" placement="bottom">
+        <template #title> {{ columnTypeName }} </template>
+        <LazySmartsheetHeaderVirtualCellIcon />
+      </NcTooltip>
+      <LazySmartsheetHeaderVirtualCellIcon v-else />
+    </template>
+    <NcTooltip placement="bottom" class="truncate name pl-1" :show-on-truncate-only="!showTooltipAlways">
       <template #title>
         {{ tooltipMsg }}
       </template>
-      <span class="name" style="white-space: nowrap" :title="column.title"> {{ column.title }}</span>
-    </a-tooltip>
+      <span :data-test-id="column.title">
+        {{ column.title }}
+      </span>
+    </NcTooltip>
 
     <span v-if="isVirtualColRequired(column, meta?.columns || []) || required" class="text-red-500">&nbsp;*</span>
 
@@ -130,7 +202,8 @@ const closeAddColumnDropdown = () => {
       <div class="flex-1" />
 
       <LazySmartsheetHeaderMenu
-        v-if="!isForm && isUIAllowed('edit-column')"
+        v-if="!isForm && isUIAllowed('fieldEdit') && !isExpandedForm"
+        v-model:is-open="isDropDownOpen"
         :virtual="true"
         @add-column="addField"
         @edit="editColumnDropdown = true"
@@ -164,7 +237,6 @@ const closeAddColumnDropdown = () => {
 <style scoped>
 .name {
   max-width: calc(100% - 40px);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-all;
 }
 </style>

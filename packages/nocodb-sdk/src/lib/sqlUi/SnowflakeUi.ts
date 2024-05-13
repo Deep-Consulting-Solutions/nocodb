@@ -92,28 +92,51 @@ export class SnowflakeUi {
         title: 'CreatedAt',
         dt: 'timestamp',
         dtx: 'specificType',
-        ct: 'varchar(45)',
+        ct: 'timestamp',
         nrqd: true,
         rqd: false,
         ck: false,
         pk: false,
         un: false,
         ai: false,
-        cdf: 'current_timestamp()',
         clen: 45,
         np: null,
         ns: null,
         dtxp: '',
         dtxs: '',
         altered: 1,
-        uidt: UITypes.DateTime,
+        uidt: UITypes.CreatedTime,
         uip: '',
         uicn: '',
+        system: true,
       },
       {
         column_name: 'updated_at',
         title: 'UpdatedAt',
         dt: 'timestamp',
+        dtx: 'specificType',
+        ct: 'timestamp',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        clen: 45,
+        np: null,
+        ns: null,
+        dtxp: '',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.LastModifiedTime,
+        uip: '',
+        uicn: '',
+        system: true,
+      },
+      {
+        column_name: 'created_by',
+        title: 'nc_created_by',
+        dt: 'varchar',
         dtx: 'specificType',
         ct: 'varchar(45)',
         nrqd: true,
@@ -122,17 +145,39 @@ export class SnowflakeUi {
         pk: false,
         un: false,
         ai: false,
-        au: true,
-        cdf: 'current_timestamp()',
         clen: 45,
         np: null,
         ns: null,
-        dtxp: '',
+        dtxp: '45',
         dtxs: '',
         altered: 1,
-        uidt: UITypes.DateTime,
+        uidt: UITypes.CreatedBy,
         uip: '',
         uicn: '',
+        system: true,
+      },
+      {
+        column_name: 'updated_by',
+        title: 'nc_updated_by',
+        dt: 'varchar',
+        dtx: 'specificType',
+        ct: 'varchar(45)',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        clen: 45,
+        np: null,
+        ns: null,
+        dtxp: '45',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.LastModifiedBy,
+        uip: '',
+        uicn: '',
+        system: true,
       },
     ];
   }
@@ -374,6 +419,7 @@ export class SnowflakeUi {
   static columnEditable(colObj) {
     return colObj.tn !== '_evolutions' || colObj.tn !== 'nc_evolutions';
   }
+  /*
 
   static extractFunctionName(query) {
     const reg =
@@ -412,18 +458,18 @@ export class SnowflakeUi {
   }
 
   static splitQueries(query) {
-    /***
+    /!***
      * we are splitting based on semicolon
      * there are mechanism to escape semicolon within single/double quotes(string)
-     */
+     *!/
     return query.match(/\b("[^"]*;[^"]*"|'[^']*;[^']*'|[^;])*;/g);
   }
 
-  /**
+  /!**
    * if sql statement is SELECT - it limits to a number
    * @param args
    * @returns {string|*}
-   */
+   *!/
   sanitiseQuery(args) {
     let q = args.query.trim().split(';');
 
@@ -551,6 +597,7 @@ export class SnowflakeUi {
   static isValidDate(value) {
     return new Date(value).getTime() > 0;
   }
+*/
 
   static colPropAuDisabled(col) {
     if (col.altered !== 1) {
@@ -572,7 +619,7 @@ export class SnowflakeUi {
   }
 
   static getAbstractType(col): any {
-    switch (col.dt.toUpperCase()) {
+    switch (col.dt?.toUpperCase()) {
       case 'NUMBER':
       case 'DECIMAL':
       case 'NUMERIC':
@@ -596,6 +643,7 @@ export class SnowflakeUi {
       case 'STRING':
         return 'string';
       case 'TEXT':
+        if (col.dtxp < 1024) return 'string';
         return 'text';
       case 'BINARY':
       case 'VARBINARY':
@@ -659,7 +707,7 @@ export class SnowflakeUi {
     }
   }
 
-  static getDataTypeForUiType(col: { uidt: UITypes }, idType?: IDType) {
+  static getDataTypeForUiType(col: { uidt: UITypes; }, idType?: IDType) {
     const colProp: any = {};
     switch (col.uidt) {
       case 'ID':
@@ -774,7 +822,7 @@ export class SnowflakeUi {
       case 'DateTime':
         colProp.dt = 'TIMESTAMP';
         break;
-      case 'CreateTime':
+      case 'CreatedTime':
         colProp.dt = 'TIMESTAMP';
         break;
       case 'LastModifiedTime':
@@ -799,7 +847,7 @@ export class SnowflakeUi {
     return colProp;
   }
 
-  static getDataTypeListForUiType(col: { uidt: UITypes }, idType: IDType) {
+  static getDataTypeListForUiType(col: { uidt: UITypes; }, idType: IDType) {
     switch (col.uidt) {
       case 'ID':
         if (idType === 'AG') {
@@ -950,9 +998,14 @@ export class SnowflakeUi {
         return ['DATE', 'TIMESTAMP'];
 
       case 'DateTime':
-      case 'CreateTime':
+      case 'CreatedTime':
       case 'LastModifiedTime':
         return ['TIMESTAMP'];
+
+      case 'User':
+      case 'CreatedBy':
+      case 'LastModifiedBy':
+        return ['VARCHAR'];
 
       case 'AutoNumber':
         return ['NUMBER', 'INT', 'INTEGER', 'BIGINT'];
@@ -970,7 +1023,16 @@ export class SnowflakeUi {
   }
 
   static getUnsupportedFnList() {
-    return [];
+    return [
+      'XOR',
+      'REGEX_MATCH',
+      'REGEX_EXTRACT',
+      'REGEX_REPLACE',
+      'VALUE',
+      'COUNTA',
+      'COUNT',
+      'DATESTR',
+    ];
   }
 }
 

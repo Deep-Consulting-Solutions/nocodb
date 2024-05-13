@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { ColumnType, FilterType } from 'nocodb-sdk'
-import { UITypes } from 'nocodb-sdk'
+import { PlanLimitTypes, UITypes } from 'nocodb-sdk'
+import type { Filter } from '#imports'
 import {
   ActiveViewInj,
+  AllFiltersInj,
   MetaInj,
   ReloadViewDataHookInj,
   comparisonOpList,
@@ -10,30 +12,47 @@ import {
   computed,
   iconMap,
   inject,
+  onMounted,
   ref,
   useNuxtApp,
   useViewFilters,
   watch,
 } from '#imports'
-import type { Filter } from '~/lib'
 
 interface Props {
-  nested?: boolean
+  nestedLevel?: number
   parentId?: string
   autoSave: boolean
   hookId?: string
   showLoading?: boolean
-  modelValue?: Filter[]
+  modelValue?: undefined | Filter[]
   webHook?: boolean
+  draftFilter?: Partial<FilterType>
 }
+const props = withDefaults(defineProps<Props>(), {
+  nestedLevel: 0,
+  autoSave: true,
+  showLoading: true,
+  parentId: undefined,
+  hookId: undefined,
+  webHook: false,
+})
 
-const { nested = false, parentId, autoSave = true, hookId = null, modelValue, showLoading = true, webHook } = defineProps<Props>()
+const emit = defineEmits(['update:filtersLength', 'update:draftFilter'])
 
-const emit = defineEmits(['update:filtersLength'])
+const excludedFilterColUidt = [UITypes.QrCode, UITypes.Barcode]
+
+const draftFilter = useVModel(props, 'draftFilter', emit)
+
+const { nestedLevel, parentId, autoSave, hookId, modelValue, showLoading, webHook } = toRefs(props)
+
+const nested = computed(() => nestedLevel.value > 0)
+
+const { t } = useI18n()
 
 const logicalOps = [
-  { value: 'and', text: 'AND' },
-  { value: 'or', text: 'OR' },
+  { value: 'and', text: t('general.and') },
+  { value: 'or', text: t('general.or') },
 ]
 
 const meta = inject(MetaInj, ref())
@@ -41,6 +60,8 @@ const meta = inject(MetaInj, ref())
 const activeView = inject(ActiveViewInj, ref())
 
 const reloadDataHook = inject(ReloadViewDataHookInj)!
+
+const isPublic = inject(IsPublicInj, ref(false))
 
 const { $e } = useNuxtApp()
 
@@ -51,30 +72,70 @@ const {
   deleteFilter,
   saveOrUpdate,
   loadFilters,
-  addFilter,
-  addFilterGroup,
+  addFilter: _addFilter,
+  addFilterGroup: _addFilterGroup,
   sync,
   saveOrUpdateDebounced,
   isComparisonOpAllowed,
   isComparisonSubOpAllowed,
+  loadBtLookupTypes,
+  btLookupTypesMap,
+  types,
 } = useViewFilters(
   activeView,
-  parentId,
-  computed(() => autoSave),
-  () => reloadDataHook.trigger(showLoading),
-  modelValue || nestedFilters.value,
-  !modelValue,
+  parentId?.value,
+  computed(() => autoSave.value),
+  () => reloadDataHook.trigger({ shouldShowLoading: showLoading.value, offset: 0 }),
+  modelValue.value || nestedFilters.value,
+  !modelValue.value,
+  webHook.value,
 )
+
+const { getPlanLimit } = useWorkspace()
 
 const localNestedFilters = ref()
 
+const wrapperDomRef = ref<HTMLElement>()
+const addFiltersRowDomRef = ref<HTMLElement>()
+
+const isMounted = ref(false)
+
 const columns = computed(() => meta.value?.columns)
 
+const fieldsToFilter = computed(() => (columns.value || []).filter((c) => !excludedFilterColUidt.includes(c.uidt as UITypes)))
+
 const getColumn = (filter: Filter) => {
-  return columns.value?.find((col: ColumnType) => col.id === filter.fk_column_id)
+  // extract looked up column if available
+  return btLookupTypesMap.value[filter.fk_column_id] || columns.value?.find((col: ColumnType) => col.id === filter.fk_column_id)
 }
 
 const filterPrevComparisonOp = ref<Record<string, string>>({})
+
+const isFilterDraft = (filter: Filter, col: ColumnType) => {
+  if (filter.id) return false
+
+  if (
+    filter.comparison_op &&
+    comparisonSubOpList(filter.comparison_op, col?.meta?.date_format).find((compOp) => compOp.value === filter.comparison_sub_op)
+      ?.ignoreVal
+  ) {
+    return false
+  }
+
+  if (
+    comparisonOpList(types.value[col.id] as UITypes, col?.meta?.date_format).find(
+      (compOp) => compOp.value === filter.comparison_op,
+    )?.ignoreVal
+  ) {
+    return false
+  }
+
+  if (filter.value) {
+    return false
+  }
+
+  return true
+}
 
 const filterUpdateCondition = (filter: FilterType, i: number) => {
   const col = getColumn(filter)
@@ -92,13 +153,13 @@ const filterUpdateCondition = (filter: FilterType, i: number) => {
     // hence remove the previous value
     filter.value = null
     filter.comparison_sub_op = null
-  } else if ([UITypes.Date, UITypes.DateTime].includes(col.uidt as UITypes)) {
+  } else if (isDateType(types.value[col.id] as UITypes)) {
     // for date / datetime,
     // the input type could be decimal or datepicker / datetime picker
     // hence remove the previous value
     filter.value = null
     if (
-      !comparisonSubOpList(filter.comparison_op!)
+      !comparisonSubOpList(filter.comparison_op!, col?.meta?.date_format)
         .map((op) => op.value)
         .includes(filter.comparison_sub_op!)
     ) {
@@ -109,7 +170,11 @@ const filterUpdateCondition = (filter: FilterType, i: number) => {
       }
     }
   }
-  saveOrUpdate(filter, i)
+
+  if (!isFilterDraft(filter, col)) {
+    saveOrUpdate(filter, i)
+  }
+
   filterPrevComparisonOp.value[filter.id!] = filter.comparison_op!
   $e('a:filter:update', {
     logical: filter.logical_op,
@@ -118,36 +183,41 @@ const filterUpdateCondition = (filter: FilterType, i: number) => {
   })
 }
 
-const types = computed(() => {
-  if (!meta.value?.columns?.length) {
-    return {}
-  }
-
-  return meta.value?.columns?.reduce((obj: any, col: any) => {
-    obj[col.id] = col.uidt
-    return obj
-  }, {})
-})
-
 watch(
   () => activeView.value?.id,
   (n, o) => {
     // if nested no need to reload since it will get reloaded from parent
-    if (!nested && n !== o && (hookId || !webHook)) loadFilters(hookId as string)
+    if (!nested.value && n !== o && (hookId?.value || !webHook.value)) loadFilters(hookId?.value, webHook.value)
   },
 )
 
-loadFilters(hookId as string)
+const allFilters: Ref<Record<string, FilterType[]>> = inject(AllFiltersInj, ref({}))
 
 watch(
   () => nonDeletedFilters.value.length,
   (length: number) => {
+    allFilters.value[parentId?.value ?? 'root'] = [...nonDeletedFilters.value]
     emit('update:filtersLength', length ?? 0)
   },
 )
 
-const applyChanges = async (hookId?: string, _nested = false) => {
-  await sync(hookId, _nested)
+const filtersCount = computed(() => {
+  return Object.values(allFilters.value).reduce((acc, filters) => {
+    return acc + filters.filter((el) => !el.is_group).length
+  }, 0)
+})
+
+const applyChanges = async (hookId?: string, nested = false, isConditionSupported = true) => {
+  // if condition is not supported, delete all filters present
+  // it's used for bulk webhooks with filters since bulk webhooks don't support conditions at the moment
+  if (!isConditionSupported) {
+    // iterate in reverse order and delete all filters, reverse order is for getting the correct index
+    for (let i = filters.value.length - 1; i >= 0; i--) {
+      await deleteFilter(filters.value[i], i)
+    }
+  }
+
+  await sync(hookId, nested)
 
   if (!localNestedFilters.value?.length) return
 
@@ -166,10 +236,11 @@ const selectFilterField = (filter: Filter, index: number) => {
   // since the existing one may not be supported for the new field
   // e.g. `eq` operator is not supported in checkbox field
   // hence, get the first option of the supported operators of the new field
-  filter.comparison_op = comparisonOpList(col.uidt as UITypes).find((compOp) => isComparisonOpAllowed(filter, compOp))
-    ?.value as FilterType['comparison_op']
+  filter.comparison_op = comparisonOpList(types.value[col.id] as UITypes, col?.meta?.date_format).find((compOp) =>
+    isComparisonOpAllowed(filter, compOp),
+  )?.value as FilterType['comparison_op']
 
-  if ([UITypes.Date, UITypes.DateTime].includes(col.uidt as UITypes) && !['blank', 'notblank'].includes(filter.comparison_op!)) {
+  if (isDateType(types.value[col.id] as UITypes) && !['blank', 'notblank'].includes(filter.comparison_op!)) {
     if (filter.comparison_op === 'isWithin') {
       filter.comparison_sub_op = 'pastNumberOfDays'
     } else {
@@ -182,7 +253,11 @@ const selectFilterField = (filter: Filter, index: number) => {
 
   // reset filter value as well
   filter.value = null
-  saveOrUpdate(filter, index)
+
+  // Do not save the filter on field change if its a draft/placeholder filter
+  if (!isFilterDraft(filter, col)) {
+    saveOrUpdate(filter, index)
+  }
 }
 
 const updateFilterValue = (value: string, filter: Filter, index: number) => {
@@ -192,129 +267,280 @@ const updateFilterValue = (value: string, filter: Filter, index: number) => {
 
 defineExpose({
   applyChanges,
-  parentId,
+  parentId: parentId?.value,
 })
+
+const scrollToBottom = () => {
+  wrapperDomRef.value?.scrollTo({
+    top: wrapperDomRef.value.scrollHeight,
+    behavior: 'smooth',
+  })
+}
+
+const scrollDownIfNeeded = () => {
+  if (nested.value) {
+    addFiltersRowDomRef?.value?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'end',
+      inline: 'nearest',
+    })
+  }
+}
+
+const addFilter = async (filter?: Partial<FilterType>) => {
+  await _addFilter(false, filter)
+
+  if (filter) {
+    selectFilterField(filters.value[filters.value.length - 1], filters.value.length - 1)
+  }
+
+  if (!nested.value) {
+    // if nested, scroll to bottom
+    scrollToBottom()
+  } else {
+    scrollDownIfNeeded()
+  }
+}
+
+const addFilterGroup = async () => {
+  await _addFilterGroup()
+
+  if (!nested.value) {
+    // if nested, scroll to bottom
+    scrollToBottom()
+  } else {
+    scrollDownIfNeeded()
+  }
+}
+
+const showFilterInput = (filter: Filter) => {
+  const col = getColumn(filter)
+  if (!filter.comparison_op) return false
+
+  if (filter.comparison_sub_op) {
+    return !comparisonSubOpList(filter.comparison_op, getColumn(filter)?.meta?.date_format).find(
+      (op) => op.value === filter.comparison_sub_op,
+    )?.ignoreVal
+  } else {
+    return !comparisonOpList(types.value[col?.id] as UITypes, col?.meta?.date_format).find(
+      (op) => op.value === filter.comparison_op,
+    )?.ignoreVal
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadFilters(hookId?.value, webHook.value), loadBtLookupTypes()])
+  isMounted.value = true
+})
+
+onBeforeUnmount(() => {
+  if (parentId.value) delete allFilters.value[parentId.value]
+})
+
+function isDateType(uidt: UITypes) {
+  return [UITypes.Date, UITypes.DateTime, UITypes.CreatedTime, UITypes.LastModifiedTime].includes(uidt)
+}
+
+watch(
+  [draftFilter, isMounted],
+  async () => {
+    if (!isMounted.value || !draftFilter.value?.fk_column_id) return
+
+    await addFilter(draftFilter.value)
+
+    await nextTick()
+
+    scrollToBottom()
+
+    const filterWrapper = document.querySelectorAll(`.nc-filter-wrapper-${draftFilter.value.fk_column_id}`)
+
+    draftFilter.value = {}
+    if (!filterWrapper.length) return
+
+    const filterInputElement =
+      filterWrapper[filterWrapper.length - 1]?.querySelector<HTMLInputElement>('.nc-filter-value-select input')
+    if (filterInputElement) {
+      setTimeout(() => {
+        filterInputElement?.focus?.()
+        filterInputElement?.click?.()
+      }, 100)
+    }
+  },
+  {
+    deep: true,
+    immediate: true,
+  },
+)
+
+const isLogicalOpChangeAllowed = computed(() => {
+  return new Set(filters.value.slice(1).map((filter) => filter.logical_op)).size > 1
+})
+
+// when logical operation is updated, update all the siblings with the same logical operation only if it's in locked state
+const onLogicalOpUpdate = async (filter: Filter, index: number) => {
+  if (index === 1 && filters.value.slice(2).every((siblingFilter) => siblingFilter.logical_op !== filter.logical_op)) {
+    await Promise.all(
+      filters.value.slice(2).map(async (siblingFilter, i) => {
+        siblingFilter.logical_op = filter.logical_op
+        await saveOrUpdate(siblingFilter, i + 2, false, false, true)
+      }),
+    )
+  }
+  await filterUpdateCondition(filter, index)
+}
 </script>
 
 <template>
   <div
-    class="p-4 menu-filter-dropdown bg-gray-50 !border"
+    class="menu-filter-dropdown"
     :class="{
-      'min-w-[430px]': filters.length,
-      'shadow max-h-[max(80vh,500px)] overflow-auto': !nested,
-      'border-1 w-full': nested,
+      'max-h-[max(80vh,500px)] min-w-112 py-2 pl-4': !nested,
+      'w-full ': nested,
+      'py-4': !filters.length,
     }"
   >
     <div
       v-if="filters && filters.length"
-      class="nc-filter-grid mb-2"
-      :class="{ 'max-h-420px overflow-y-auto': !nested }"
+      ref="wrapperDomRef"
+      class="flex flex-col gap-y-3 nc-filter-grid w-full"
+      :class="{ 'max-h-420px nc-scrollbar-thin nc-filter-top-wrapper pr-4 my-2 py-1': !nested }"
       @click.stop
     >
       <template v-for="(filter, i) in filters" :key="i">
         <template v-if="filter.status !== 'delete'">
           <template v-if="filter.is_group">
-            <component
-              :is="iconMap.closeBox"
-              v-if="!filter.readOnly"
-              :key="i"
-              small
-              class="nc-filter-item-remove-btn cursor-pointer text-grey"
-              @click.stop="deleteFilter(filter, i)"
-            />
-            <span v-else :key="`${i}dummy`" />
-
-            <div :key="`${i}nested`" class="flex">
-              <a-select
-                v-model:value="filter.logical_op"
-                :dropdown-match-select-width="false"
-                class="shrink grow-0"
-                placeholder="Group op"
-                dropdown-class-name="nc-dropdown-filter-logical-op-group"
-                @click.stop
-                @change="saveOrUpdate(filter, i)"
-              >
-                <a-select-option v-for="op in logicalOps" :key="op.value" :value="op.value" class="">
-                  {{ op.text }}
-                </a-select-option>
-              </a-select>
-            </div>
-            <span class="col-span-3" />
-            <div class="col-span-6">
-              <LazySmartsheetToolbarColumnFilter
-                v-if="filter.id || filter.children"
-                :key="filter.id ?? i"
-                ref="localNestedFilters"
-                v-model="filter.children"
-                :parent-id="filter.id"
-                nested
-                :auto-save="autoSave"
-              />
+            <div class="flex flex-col w-full gap-y-2">
+              <div class="flex flex-row w-full justify-between items-center">
+                <span v-if="!i" class="flex items-center ml-2">{{ $t('labels.where') }}</span>
+                <div v-else :key="`${i}nested`" class="flex nc-filter-logical-op">
+                  <NcSelect
+                    v-model:value="filter.logical_op"
+                    v-e="['c:filter:logical-op:select']"
+                    :dropdown-match-select-width="false"
+                    class="min-w-20 capitalize"
+                    placeholder="Group op"
+                    dropdown-class-name="nc-dropdown-filter-logical-op-group"
+                    :disabled="i > 1 && !isLogicalOpChangeAllowed"
+                    @click.stop
+                    @change="saveOrUpdate(filter, i)"
+                  >
+                    <a-select-option v-for="op in logicalOps" :key="op.value" :value="op.value">
+                      <div class="flex items-center w-full justify-between w-full gap-2">
+                        <div class="truncate flex-1 capitalize">{{ op.value }}</div>
+                        <component
+                          :is="iconMap.check"
+                          v-if="filter.logical_op === op.value"
+                          id="nc-selected-item-icon"
+                          class="text-primary w-4 h-4"
+                        />
+                      </div>
+                    </a-select-option>
+                  </NcSelect>
+                </div>
+                <NcButton
+                  v-if="!filter.readOnly"
+                  :key="i"
+                  v-e="['c:filter:delete']"
+                  type="text"
+                  size="small"
+                  class="nc-filter-item-remove-btn cursor-pointer"
+                  @click.stop="deleteFilter(filter, i)"
+                >
+                  <component :is="iconMap.deleteListItem" />
+                </NcButton>
+              </div>
+              <div class="flex border-1 rounded-lg p-2 w-full" :class="nestedLevel % 2 !== 0 ? 'bg-white' : 'bg-gray-100'">
+                <LazySmartsheetToolbarColumnFilter
+                  v-if="filter.id || filter.children"
+                  :key="filter.id ?? i"
+                  ref="localNestedFilters"
+                  v-model="filter.children"
+                  :nested-level="nestedLevel + 1"
+                  :parent-id="filter.id"
+                  :auto-save="autoSave"
+                  :web-hook="webHook"
+                />
+              </div>
             </div>
           </template>
-          <template v-else>
-            <component
-              :is="iconMap.closeBox"
-              v-if="!filter.readOnly"
-              class="nc-filter-item-remove-btn text-grey self-center"
-              @click.stop="deleteFilter(filter, i)"
-            />
+          <div v-else class="flex flex-row gap-x-2 w-full" :class="`nc-filter-wrapper-${filter.fk_column_id}`">
+            <span v-if="!i" class="flex items-center ml-2 mr-7.35">{{ $t('labels.where') }}</span>
 
-            <span v-else />
-
-            <span v-if="!i" class="flex items-center">{{ $t('labels.where') }}</span>
-
-            <a-select
+            <NcSelect
               v-else
               v-model:value="filter.logical_op"
+              v-e="['c:filter:logical-op:select']"
               :dropdown-match-select-width="false"
-              class="h-full"
+              class="h-full !min-w-20 !max-w-20 capitalize"
               hide-details
-              :disabled="filter.readOnly"
+              :disabled="filter.readOnly || (i > 1 && !isLogicalOpChangeAllowed)"
               dropdown-class-name="nc-dropdown-filter-logical-op"
-              @change="filterUpdateCondition(filter, i)"
+              @change="onLogicalOpUpdate(filter, i)"
               @click.stop
             >
               <a-select-option v-for="op of logicalOps" :key="op.value" :value="op.value">
-                {{ op.text }}
+                <div class="flex items-center w-full justify-between w-full gap-2">
+                  <div class="truncate flex-1 capitalize">{{ op.value }}</div>
+                  <component
+                    :is="iconMap.check"
+                    v-if="filter.logical_op === op.value"
+                    id="nc-selected-item-icon"
+                    class="text-primary w-4 h-4"
+                  />
+                </div>
               </a-select-option>
-            </a-select>
-            <LazySmartsheetToolbarFieldListAutoCompleteDropdown
+            </NcSelect>
+            <SmartsheetToolbarFieldListAutoCompleteDropdown
               :key="`${i}_6`"
               v-model="filter.fk_column_id"
-              class="nc-filter-field-select"
-              :columns="columns"
+              class="nc-filter-field-select min-w-32 max-w-32 max-h-8"
+              :columns="fieldsToFilter"
               :disabled="filter.readOnly"
               @click.stop
               @change="selectFilterField(filter, i)"
             />
-            <a-select
+            <NcSelect
               v-model:value="filter.comparison_op"
+              v-e="['c:filter:comparison-op:select']"
               :dropdown-match-select-width="false"
-              class="caption nc-filter-operation-select"
+              class="caption nc-filter-operation-select !min-w-26.75 !max-w-26.75 max-h-8"
               :placeholder="$t('labels.operation')"
               density="compact"
               variant="solo"
               :disabled="filter.readOnly"
               hide-details
-              dropdown-class-name="nc-dropdown-filter-comp-op"
+              dropdown-class-name="nc-dropdown-filter-comp-op !max-w-80"
               @change="filterUpdateCondition(filter, i)"
             >
-              <template v-for="compOp of comparisonOpList(getColumn(filter)?.uidt)" :key="compOp.value">
+              <template
+                v-for="compOp of comparisonOpList(types[filter.fk_column_id], getColumn(filter)?.meta?.date_format)"
+                :key="compOp.value"
+              >
                 <a-select-option v-if="isComparisonOpAllowed(filter, compOp)" :value="compOp.value">
-                  {{ compOp.text }}
+                  <div class="flex items-center w-full justify-between w-full gap-2">
+                    <div class="truncate flex-1">{{ compOp.text }}</div>
+                    <component
+                      :is="iconMap.check"
+                      v-if="filter.comparison_op === compOp.value"
+                      id="nc-selected-item-icon"
+                      class="text-primary w-4 h-4"
+                    />
+                  </div>
                 </a-select-option>
               </template>
-            </a-select>
+            </NcSelect>
 
-            <a-select
-              v-if="
-                [UITypes.Date, UITypes.DateTime].includes(getColumn(filter)?.uidt) &&
-                !['blank', 'notblank'].includes(filter.comparison_op)
-              "
+            <div v-if="['blank', 'notblank'].includes(filter.comparison_op)" class="flex flex-grow"></div>
+            <NcSelect
+              v-else-if="isDateType(types[filter.fk_column_id])"
               v-model:value="filter.comparison_sub_op"
+              v-e="['c:filter:sub-comparison-op:select']"
               :dropdown-match-select-width="false"
-              class="caption nc-filter-sub_operation-select"
+              class="caption nc-filter-sub_operation-select min-w-28"
+              :class="{
+                'flex-grow w-full': !showFilterInput(filter),
+                'max-w-28': showFilterInput(filter),
+              }"
               :placeholder="$t('labels.operationSub')"
               density="compact"
               variant="solo"
@@ -323,15 +549,26 @@ defineExpose({
               dropdown-class-name="nc-dropdown-filter-comp-sub-op"
               @change="filterUpdateCondition(filter, i)"
             >
-              <template v-for="compSubOp of comparisonSubOpList(filter.comparison_op)" :key="compSubOp.value">
+              <template
+                v-for="compSubOp of comparisonSubOpList(filter.comparison_op, getColumn(filter)?.meta?.date_format)"
+                :key="compSubOp.value"
+              >
                 <a-select-option v-if="isComparisonSubOpAllowed(filter, compSubOp)" :value="compSubOp.value">
-                  {{ compSubOp.text }}
+                  <div class="flex items-center w-full justify-between w-full gap-2 max-w-40">
+                    <NcTooltip show-on-truncate-only class="truncate flex-1">
+                      <template #title>{{ compSubOp.text }}</template>
+                      {{ compSubOp.text }}
+                    </NcTooltip>
+                    <component
+                      :is="iconMap.check"
+                      v-if="filter.comparison_sub_op === compSubOp.value"
+                      id="nc-selected-item-icon"
+                      class="text-primary w-4 h-4"
+                    />
+                  </div>
                 </a-select-option>
               </template>
-            </a-select>
-
-            <span v-else />
-
+            </NcSelect>
             <a-checkbox
               v-if="filter.field && types[filter.field] === 'boolean'"
               v-model:checked="filter.value"
@@ -340,57 +577,111 @@ defineExpose({
               @change="saveOrUpdate(filter, i)"
             />
 
-            <span
-              v-else-if="
-                filter.comparison_sub_op
-                  ? comparisonSubOpList(filter.comparison_op).find((op) => op.value === filter.comparison_sub_op)?.ignoreVal ??
-                    false
-                  : comparisonOpList(getColumn(filter)?.uidt).find((op) => op.value === filter.comparison_op)?.ignoreVal ?? false
-              "
-              :key="`span${i}`"
-            />
-
-            <LazySmartsheetToolbarFilterInput
-              v-else
-              class="nc-filter-value-select min-w-[120px]"
-              :column="getColumn(filter)"
+            <SmartsheetToolbarFilterInput
+              v-if="showFilterInput(filter)"
+              class="nc-filter-value-select rounded-md min-w-34"
+              :column="{ ...getColumn(filter), uidt: types[filter.fk_column_id] }"
               :filter="filter"
               @update-filter-value="(value) => updateFilterValue(value, filter, i)"
               @click.stop
             />
-          </template>
+            <div v-else-if="!isDateType(types[filter.fk_column_id])" class="flex-grow"></div>
+
+            <NcButton
+              v-if="!filter.readOnly"
+              v-e="['c:filter:delete']"
+              type="text"
+              size="small"
+              class="nc-filter-item-remove-btn self-center"
+              @click.stop="deleteFilter(filter, i)"
+            >
+              <component :is="iconMap.deleteListItem" />
+            </NcButton>
+          </div>
         </template>
       </template>
     </div>
 
-    <div class="flex gap-2 mb-2 mt-4">
-      <a-button class="elevation-0 text-capitalize" type="primary" ghost @click.stop="addFilter()">
-        <div class="flex items-center gap-1">
-          <component :is="iconMap.plus" />
-          <!-- Add Filter -->
-          {{ $t('activity.addFilter') }}
-        </div>
-      </a-button>
+    <template v-if="isEeUI && !isPublic">
+      <div
+        v-if="filtersCount < getPlanLimit(PlanLimitTypes.FILTER_LIMIT)"
+        ref="addFiltersRowDomRef"
+        class="flex gap-2"
+        :class="{
+          'mt-1 mb-2': filters.length,
+        }"
+      >
+        <NcButton size="small" type="text" class="!text-brand-500" @click.stop="addFilter()">
+          <div class="flex items-center gap-1">
+            <component :is="iconMap.plus" />
+            <!-- Add Filter -->
+            {{ $t('activity.addFilter') }}
+          </div>
+        </NcButton>
 
-      <a-button v-if="!webHook" class="text-capitalize !text-gray-500" @click.stop="addFilterGroup()">
-        <div class="flex items-center gap-1">
-          <!-- Add Filter Group -->
-          <component :is="iconMap.plus" />
-          {{ $t('activity.addFilterGroup') }}
-        </div>
-      </a-button>
+        <NcButton v-if="nestedLevel < 5" type="text" size="small" @click.stop="addFilterGroup()">
+          <div class="flex items-center gap-1">
+            <!-- Add Filter Group -->
+            <component :is="iconMap.plus" />
+            {{ $t('activity.addFilterGroup') }}
+          </div>
+        </NcButton>
+      </div>
+    </template>
+    <template v-else>
+      <div
+        ref="addFiltersRowDomRef"
+        class="flex gap-2"
+        :class="{
+          'mt-1 mb-2': filters.length,
+        }"
+      >
+        <NcButton size="small" type="text" class="!text-brand-500" @click.stop="addFilter()">
+          <div class="flex items-center gap-1">
+            <component :is="iconMap.plus" />
+            <!-- Add Filter -->
+            {{ $t('activity.addFilter') }}
+          </div>
+        </NcButton>
+
+        <NcButton v-if="!webHook && nestedLevel < 5" type="text" size="small" @click.stop="addFilterGroup()">
+          <div class="flex items-center gap-1">
+            <!-- Add Filter Group -->
+            <component :is="iconMap.plus" />
+            {{ $t('activity.addFilterGroup') }}
+          </div>
+        </NcButton>
+      </div>
+    </template>
+    <div
+      v-if="!filters.length"
+      class="flex flex-row text-gray-400 mt-2"
+      :class="{
+        'ml-1': nested,
+        'ml-0.5': !nested,
+      }"
+    >
+      {{ $t('title.noFiltersAdded') }}
     </div>
+
     <slot />
   </div>
 </template>
 
 <style scoped>
+.nc-filter-item-remove-btn {
+  @apply text-gray-600 hover:text-gray-800;
+}
+
 .nc-filter-grid {
-  grid-template-columns: auto auto auto auto auto auto;
-  @apply grid gap-[12px] items-center;
+  @apply items-center w-full;
 }
 
 :deep(.ant-select-item-option) {
   @apply "!min-w-full";
+}
+
+:deep(.ant-select-selector) {
+  @apply !min-h-8.25;
 }
 </style>

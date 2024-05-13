@@ -2,12 +2,15 @@
 import {
   ActiveCellInj,
   ColumnInj,
+  EditColumnInj,
   IsFormInj,
+  IsSurveyFormInj,
   ReadonlyInj,
   getMdiIcon,
   inject,
   parseProp,
-  useProject,
+  rowHeightInPx,
+  useBase,
   useSelectedCellKeyupListener,
 } from '#imports'
 
@@ -27,15 +30,27 @@ const emits = defineEmits<Emits>()
 
 const active = inject(ActiveCellInj, ref(false))
 
-const { isMssql } = useProject()
+const { isMssql } = useBase()
 
 const column = inject(ColumnInj)
 
 const isForm = inject(IsFormInj)
 
+const isEditColumnMenu = inject(EditColumnInj, ref(false))
+
+const isGallery = inject(IsGalleryInj, ref(false))
+
 const readOnly = inject(ReadonlyInj)
 
-const checkboxMeta = $computed(() => {
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))
+
+const rowHeight = inject(RowHeightInj, ref())
+
+const isSurveyForm = inject(IsSurveyFormInj, ref(false))
+
+const isGrid = inject(IsGridInj, ref(false))
+
+const checkboxMeta = computed(() => {
   return {
     icon: {
       checked: 'mdi-check-circle-outline',
@@ -46,12 +61,12 @@ const checkboxMeta = $computed(() => {
   }
 })
 
-let vModel = $computed<boolean | number>({
-  get: () => !!props.modelValue && props.modelValue !== '0' && props.modelValue !== 0,
-  set: (val: any) => emits('update:modelValue', isMssql(column?.value?.base_id) ? +val : val),
+const vModel = computed<boolean | number>({
+  get: () => !!props.modelValue && props.modelValue !== '0' && props.modelValue !== 0 && props.modelValue !== 'false',
+  set: (val: any) => emits('update:modelValue', isMssql(column?.value?.source_id) ? +val : val),
 })
 
-function onClick(force?: boolean, event?: MouseEvent) {
+function onClick(force?: boolean, event?: MouseEvent | KeyboardEvent) {
   if (
     (event?.target as HTMLElement)?.classList?.contains('nc-checkbox') ||
     (event?.target as HTMLElement)?.closest('.nc-checkbox')
@@ -59,7 +74,20 @@ function onClick(force?: boolean, event?: MouseEvent) {
     return
   }
   if (!readOnly?.value && (force || active.value)) {
-    vModel = !vModel
+    vModel.value = !vModel.value
+  }
+}
+
+const keydownEnter = (e: KeyboardEvent) => {
+  if (!isSurveyForm.value) {
+    onClick(true, e)
+    e.stopPropagation()
+  }
+}
+const keydownSpace = (e: KeyboardEvent) => {
+  if (isSurveyForm.value) {
+    onClick(true, e)
+    e.stopPropagation()
   }
 }
 
@@ -75,16 +103,34 @@ useSelectedCellKeyupListener(active, (e) => {
 
 <template>
   <div
-    class="flex cursor-pointer w-full h-full"
+    class="flex cursor-pointer w-full h-full items-center focus:outline-none"
     :class="{
-      'justify-center': !isForm,
-      'w-full': isForm,
+      'w-full flex-start pl-2': isForm || isGallery || isExpandedFormOpen,
+      'w-full justify-center': !isForm && !isGallery && !isExpandedFormOpen,
       'nc-cell-hover-show': !vModel && !readOnly,
       'opacity-0': readOnly && !vModel,
+      'pointer-events-none': readOnly,
     }"
+    :style="{
+      height:
+        isGrid && !isForm && !isExpandedFormOpen && !isEditColumnMenu
+          ? `${!rowHeight || rowHeight === 1 ? rowHeightInPx['1'] - 4 : rowHeightInPx[`${rowHeight}`] - 20}px`
+          : undefined,
+    }"
+    :tabindex="readOnly ? -1 : 0"
     @click="onClick(false, $event)"
+    @keydown.enter="keydownEnter"
+    @keydown.space="keydownSpace($event)"
   >
-    <div class="p-1 rounded-full items-center" :class="{ 'bg-gray-100': !vModel, '!ml-[-8px]': readOnly }">
+    <div
+      class="flex items-center"
+      :class="{
+        'w-full justify-start': isEditColumnMenu || isGallery || isForm,
+        'justify-center': !isEditColumnMenu && !isGallery && !isForm,
+        'py-2': isEditColumnMenu,
+      }"
+      @click="onClick(true)"
+    >
       <Transition name="layout" mode="out-in" :duration="100">
         <component
           :is="getMdiIcon(vModel ? checkboxMeta.icon.checked : checkboxMeta.icon.unchecked)"
@@ -92,7 +138,6 @@ useSelectedCellKeyupListener(active, (e) => {
           :style="{
             color: checkboxMeta.color,
           }"
-          @click="onClick(true)"
         />
       </Transition>
     </div>

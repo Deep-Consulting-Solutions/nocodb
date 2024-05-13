@@ -1,6 +1,17 @@
 <script lang="ts" setup>
 import type { VNodeRef } from '@vue/runtime-core'
-import { EditModeInj, IsSurveyFormInj, computed, inject, useI18n, validateEmail } from '#imports'
+import {
+  EditColumnInj,
+  EditModeInj,
+  IsExpandedFormOpenInj,
+  IsFormInj,
+  ReadonlyInj,
+  computed,
+  inject,
+  useI18n,
+  validateEmail,
+} from '#imports'
+import { extractEmail } from '~/helpers/parsers/parserHelpers'
 
 interface Props {
   modelValue: string | null | undefined
@@ -10,6 +21,8 @@ const { modelValue: value } = defineProps<Props>()
 
 const emit = defineEmits(['update:modelValue'])
 
+const rowHeight = inject(RowHeightInj, ref(undefined))
+
 const { t } = useI18n()
 
 const { showNull } = useGlobal()
@@ -18,16 +31,22 @@ const editEnabled = inject(EditModeInj)!
 
 const column = inject(ColumnInj)!
 
+const isEditColumn = inject(EditColumnInj, ref(false))
+
+const readOnly = inject(ReadonlyInj, ref(false))
+
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))!
+
+const isForm = inject(IsFormInj)!
+
 // Used in the logic of when to display error since we are not storing the email if it's not valid
 const localState = ref(value)
-
-const isSurveyForm = inject(IsSurveyFormInj, ref(false))
 
 const vModel = computed({
   get: () => value,
   set: (val) => {
     localState.value = val
-    if (!parseProp(column.value.meta)?.validate || (val && validateEmail(val)) || !val || isSurveyForm.value) {
+    if (!parseProp(column.value.meta)?.validate || (val && validateEmail(val)) || !val || isForm.value) {
       emit('update:modelValue', val)
     }
   },
@@ -35,12 +54,29 @@ const vModel = computed({
 
 const validEmail = computed(() => vModel.value && validateEmail(vModel.value))
 
-const focus: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
+const focus: VNodeRef = (el) =>
+  !isExpandedFormOpen.value && !isEditColumn.value && !isForm.value && (el as HTMLInputElement)?.focus()
+
+const onPaste = (e: ClipboardEvent) => {
+  const pastedText = e.clipboardData?.getData('text') ?? ''
+
+  if (parseProp(column.value.meta).validate) {
+    vModel.value = extractEmail(pastedText) || pastedText
+  } else {
+    vModel.value = pastedText
+  }
+}
 
 watch(
   () => editEnabled.value,
   () => {
-    if (parseProp(column.value.meta)?.validate && !editEnabled.value && localState.value && !validateEmail(localState.value)) {
+    if (
+      !isForm.value &&
+      parseProp(column.value.meta)?.validate &&
+      !editEnabled.value &&
+      localState.value &&
+      !validateEmail(localState.value)
+    ) {
       message.error(t('msg.error.invalidEmail'))
       localState.value = undefined
       return
@@ -52,10 +88,11 @@ watch(
 
 <template>
   <input
-    v-if="editEnabled"
+    v-if="!readOnly && editEnabled"
     :ref="focus"
     v-model="vModel"
-    class="w-full outline-none text-sm px-2"
+    class="nc-cell-field w-full outline-none py-1"
+    :placeholder="isEditColumn ? $t('labels.optional') : ''"
     @blur="editEnabled = false"
     @keydown.down.stop
     @keydown.left.stop
@@ -64,13 +101,21 @@ watch(
     @keydown.delete.stop
     @selectstart.capture.stop
     @mousedown.stop
+    @paste.prevent="onPaste"
   />
 
-  <span v-else-if="vModel === null && showNull" class="nc-null">NULL</span>
+  <span v-else-if="vModel === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
 
-  <a v-else-if="validEmail" class="text-sm underline hover:opacity-75" :href="`mailto:${vModel}`" target="_blank">
-    {{ vModel }}
-  </a>
+  <nuxt-link
+    v-else-if="validEmail"
+    no-ref
+    class="py-1 underline hover:opacity-75 inline-block nc-cell-field-link max-w-full"
+    :href="`mailto:${vModel}`"
+    target="_blank"
+    :tabindex="readOnly ? -1 : 0"
+  >
+    <LazyCellClampedText :value="vModel" :lines="rowHeight" class="nc-cell-field" />
+  </nuxt-link>
 
-  <span v-else>{{ vModel }}</span>
+  <LazyCellClampedText v-else :value="vModel" :lines="rowHeight" class="nc-cell-field" />
 </template>

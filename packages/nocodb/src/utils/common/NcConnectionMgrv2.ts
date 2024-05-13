@@ -1,0 +1,114 @@
+import type Source from '~/models/Source';
+import {
+  defaultConnectionConfig,
+  defaultConnectionOptions,
+} from '~/utils/nc-config';
+import SqlClientFactory from '~/db/sql-client/lib/SqlClientFactory';
+import { XKnex } from '~/db/CustomKnex';
+import Noco from '~/Noco';
+
+export default class NcConnectionMgrv2 {
+  protected static connectionRefs: {
+    [baseId: string]: {
+      [sourceId: string]: XKnex;
+    };
+  } = {};
+
+  public static async destroyAll() {
+    for (const baseId in this.connectionRefs) {
+      for (const sourceId in this.connectionRefs[baseId]) {
+        await this.connectionRefs[baseId][sourceId].destroy();
+      }
+    }
+  }
+
+  // Todo: Should await on connection destroy
+  public static delete(source: Source) {
+    // todo: ignore meta bases
+    if (this.connectionRefs?.[source.base_id]?.[source.id]) {
+      try {
+        const conn = this.connectionRefs?.[source.base_id]?.[source.id];
+        conn.destroy();
+        delete this.connectionRefs?.[source.base_id][source.id];
+      } catch (e) {
+        console.log(e);
+      }
+    }
+  }
+
+  public static async deleteAwait(source: Source) {
+    // todo: ignore meta bases
+    if (this.connectionRefs?.[source.base_id]?.[source.id]) {
+      try {
+        const conn = this.connectionRefs?.[source.base_id]?.[source.id];
+        await conn.destroy();
+        delete this.connectionRefs?.[source.base_id][source.id];
+      } catch (e) {
+        console.log(e);
+      }
+    }
+  }
+
+  public static async get(source: Source): Promise<XKnex> {
+    try {
+      console.log('-->', { base: JSON.stringify(source) });
+      console.log('-->', { connectionRefs: JSON.stringify(this.connectionRefs) });
+    } catch (error) {}
+
+    if (source.isMeta()) return Noco.ncMeta.knex;
+
+    if (this.connectionRefs?.[source.base_id]?.[source.id]) {
+      return this.connectionRefs?.[source.base_id]?.[source.id];
+    }
+    this.connectionRefs[source.base_id] =
+      this.connectionRefs?.[source.base_id] || {};
+
+    const connectionConfig = await source.getConnectionConfig();
+
+    try {
+      console.log('-->', 'connection not found creating new connection');
+      console.log('-->', { connectionConfig: JSON.stringify(connectionConfig) });
+    } catch (error) {}
+
+    this.connectionRefs[source.base_id][source.id] = XKnex({
+      ...defaultConnectionOptions,
+      ...connectionConfig,
+      connection: {
+        ...defaultConnectionConfig,
+        ...connectionConfig.connection,
+        statement_timeout: 45000,
+        typeCast(field, next) {
+          const res = next();
+
+          // mysql - convert all other buffer values to hex string
+          // if `bit` datatype then convert it to integer number
+          if (res && res instanceof Buffer) {
+            const hex = [...res]
+              .map((v) => ('00' + v.toString(16)).slice(-2))
+              .join('');
+            if (field.type == 'BIT') {
+              return parseInt(hex, 16);
+            }
+            return hex;
+          }
+
+          // mysql `decimal` datatype returns value as string, convert it to float number
+          if (field.type == 'NEWDECIMAL') {
+            return res && parseFloat(res);
+          }
+
+          return res;
+        },
+      },
+    } as any);
+    return this.connectionRefs[source.base_id][source.id];
+  }
+
+  public static async getSqlClient(source: Source, _knex = null) {
+    const knex = _knex || (await this.get(source));
+    return SqlClientFactory.create({
+      knex,
+      ...(await source.getConnectionConfig()),
+    });
+  }
+}

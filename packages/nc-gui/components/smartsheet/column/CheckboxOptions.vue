@@ -80,20 +80,28 @@ watch(
       <a-form-item label="Icon">
         <a-select v-model:value="vModel.meta.iconIdx" class="w-52" dropdown-class-name="nc-dropdown-checkbox-icon">
           <a-select-option v-for="(icon, i) of iconList" :key="i" :value="i">
-            <div class="flex items-center">
-              <component
-                :is="getMdiIcon(icon.checked)"
-                class="mx-1"
-                :style="{
-                  color: vModel.meta.color,
-                }"
-              />
+            <div class="flex gap-2 w-full truncate items-center">
+              <div class="flex-1 truncate">
+                <component
+                  :is="getMdiIcon(icon.checked)"
+                  class="mx-1"
+                  :style="{
+                    color: vModel.meta.color,
+                  }"
+                />
+                <component
+                  :is="getMdiIcon(icon.unchecked)"
+                  :style="{
+                    color: vModel.meta.color,
+                  }"
+                />
+              </div>
 
               <component
-                :is="getMdiIcon(icon.unchecked)"
-                :style="{
-                  color: vModel.meta.color,
-                }"
+                :is="iconMap.check"
+                v-if="vModel.meta.iconIdx === i"
+                id="nc-selected-item-icon"
+                class="text-primary w-4 h-4"
               />
             </div>
           </a-select-option>
@@ -106,7 +114,8 @@ watch(
     <LazyGeneralColorPicker
       v-model="picked"
       :row-size="8"
-      :colors="['#fcb401', '#faa307', '#f48c06', '#e85d04', '#dc2f02', '#d00000', '#9d0208', '#777']"
+      :colors="['#FF94B6', '#6A8D9D', '#6DAE42', '#4AC0BF', '#905FB3', '#FF8320', '#6BCC72', '#FF4138']"
+      @input="(el:string)=>vModel.meta.color=el"
     />
   </a-row>
 </template>

@@ -34,7 +34,7 @@ services:
       retries: 10
       test: "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"
       timeout: 2s
-    image: "postgres:12.1-alpine"
+    image: "postgres:12.17-alpine"
     networks: 
       - traefik_proxy
     restart: always
@@ -62,7 +62,7 @@ services:
       - "--certificatesResolvers.letsencrypt.acme.dnsChallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
     container_name: traefik
     environment: 
-      - "CF_DNS_API_TOKEN=${CLOUDFLARE_TOKEN}"
+      - "CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}"
     healthcheck: 
       retries: 3
       test: 
@@ -71,7 +71,7 @@ services:
         - "-c"
         - "http://localhost:8081/ping"
       timeout: 3s
-    image: "traefik:v2.2"
+    image: "traefik:v2.11"
     networks: 
       - default
       - traefik_proxy

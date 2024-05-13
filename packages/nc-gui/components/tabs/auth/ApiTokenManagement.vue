@@ -6,10 +6,10 @@ import {
   message,
   onMounted,
   storeToRefs,
+  useBase,
   useCopy,
   useI18n,
   useNuxtApp,
-  useProject,
 } from '#imports'
 
 interface ApiToken extends ApiTokenType {
@@ -20,26 +20,27 @@ const { t } = useI18n()
 
 const { $api, $e } = useNuxtApp()
 
-const { project } = $(storeToRefs(useProject()))
+const baseStore = useBase()
+const { base } = storeToRefs(baseStore)
 
 const { copy } = useCopy()
 
-let tokensInfo = $ref<ApiToken[] | undefined>([])
+const tokensInfo = ref<ApiToken[] | undefined>([])
 
-let showNewTokenModal = $ref(false)
+const showNewTokenModal = ref(false)
 
-let showDeleteTokenModal = $ref(false)
+const showDeleteTokenModal = ref(false)
 
-let selectedTokenData = $ref<ApiToken>({})
+const selectedTokenData = ref<ApiToken>({})
 
 const loadApiTokens = async () => {
-  if (!project?.id) return
+  if (!base.value?.id) return
 
-  tokensInfo = (await $api.apiToken.list(project.id)).list
+  tokensInfo.value = (await $api.apiToken.list(base.value.id)).list
 }
 
 const openNewTokenModal = () => {
-  showNewTokenModal = true
+  showNewTokenModal.value = true
   $e('c:api-token:generate')
 }
 
@@ -58,13 +59,13 @@ const copyToken = async (token: string | undefined) => {
 
 const generateToken = async () => {
   try {
-    if (!project?.id) return
+    if (!base.value?.id) return
 
-    await $api.apiToken.create(project.id, selectedTokenData)
-    showNewTokenModal = false
+    await $api.apiToken.create(base.value.id, selectedTokenData.value)
+    showNewTokenModal.value = false
     // Token generated successfully
     message.success(t('msg.success.tokenGenerated'))
-    selectedTokenData = {}
+    selectedTokenData.value = {}
     await loadApiTokens()
   } catch (e: any) {
     message.error(await extractSdkResponseErrorMsg(e))
@@ -75,14 +76,14 @@ const generateToken = async () => {
 
 const deleteToken = async () => {
   try {
-    if (!project?.id || !selectedTokenData.token) return
+    if (!base.value?.id || !selectedTokenData.value.token) return
 
-    await $api.apiToken.delete(project.id, selectedTokenData.token)
+    await $api.apiToken.delete(base.value.id, selectedTokenData.value.token)
 
     // Token deleted successfully
     message.success(t('msg.success.tokenDeleted'))
     await loadApiTokens()
-    showDeleteTokenModal = false
+    showDeleteTokenModal.value = false
   } catch (e: any) {
     message.error(await extractSdkResponseErrorMsg(e))
   }
@@ -91,8 +92,8 @@ const deleteToken = async () => {
 }
 
 const openDeleteModal = (item: ApiToken) => {
-  selectedTokenData = item
-  showDeleteTokenModal = true
+  selectedTokenData.value = item
+  showDeleteTokenModal.value = true
 }
 
 onMounted(() => {
@@ -119,7 +120,7 @@ onMounted(() => {
         </a-button>
 
         <!-- Generate Token -->
-        <div class="flex flex-row justify-center w-full -mt-1 mb-3">
+        <div class="flex flex-row justify-start w-full -mt-1 mb-3">
           <a-typography-title :level="5">{{ $t('title.generateToken') }}</a-typography-title>
         </div>
 
@@ -129,16 +130,16 @@ onMounted(() => {
           :model="selectedTokenData"
           name="basic"
           layout="vertical"
-          class="flex flex-col justify-center space-y-6"
+          class="flex flex-col justify-center space-y-3"
           no-style
           autocomplete="off"
           @finish="generateToken"
         >
-          <a-input v-model:value="selectedTokenData.description" :placeholder="$t('labels.description')" />
+          <a-input v-model:value="selectedTokenData.description" size="middle" :placeholder="$t('labels.description')" />
 
           <!-- Generate -->
-          <div class="flex flex-row justify-center">
-            <a-button type="primary" html-type="submit">
+          <div class="flex flex-row justify-end">
+            <a-button type="primary" html-type="submit" class="!rounded-md">
               {{ $t('general.generate') }}
             </a-button>
           </div>
@@ -157,14 +158,14 @@ onMounted(() => {
       <div class="flex flex-col h-full">
         <div class="flex flex-row justify-center mt-2 text-center w-full text-base">This action will remove this API Token</div>
 
-        <div class="flex mt-6 justify-center space-x-2">
-          <a-button @click="showDeleteTokenModal = false"> {{ $t('general.cancel') }}</a-button>
-          <a-button type="primary" danger @click="deleteToken()"> {{ $t('general.confirm') }}</a-button>
+        <div class="flex mt-6 justify-end space-x-2">
+          <a-button class="!rounded-md" @click="showDeleteTokenModal = false"> {{ $t('general.cancel') }}</a-button>
+          <a-button class="!rounded-md" type="primary" danger @click="deleteToken()"> {{ $t('general.confirm') }}</a-button>
         </div>
       </div>
     </a-modal>
 
-    <div class="flex flex-col px-10 mt-6">
+    <div class="flex flex-col px-10">
       <div class="flex flex-row justify-end">
         <div class="flex flex-row space-x-1">
           <a-button size="middle" type="text" @click="loadApiTokens()">
@@ -175,7 +176,7 @@ onMounted(() => {
           </a-button>
 
           <!--        Add New Token -->
-          <a-button size="middle" type="primary" ghost @click="openNewTokenModal">
+          <a-button type="primary" size="middle" class="!rounded-md" @click="openNewTokenModal">
             <div class="flex flex-row justify-center items-center caption capitalize space-x-1">
               <component :is="iconMap.plus" />
               <div>{{ $t('activity.newToken') }}</div>
@@ -244,7 +245,7 @@ onMounted(() => {
                 <template #overlay>
                   <a-menu>
                     <a-menu-item>
-                      <div class="flex flex-row items-center py-3 h-[1rem]" @click="openDeleteModal(item)">
+                      <div class="flex flex-row items-center py-4 h-[1rem]" @click="openDeleteModal(item)">
                         <component :is="iconMap.delete" class="flex" />
                         <div class="text-xs pl-2">{{ $t('general.remove') }}</div>
                       </div>

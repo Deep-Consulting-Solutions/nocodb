@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import type { ColumnReqType } from 'nocodb-sdk'
-import { UITypes, isVirtualCol } from 'nocodb-sdk'
+import type { ColumnReqType, ColumnType } from 'nocodb-sdk'
+import { UITypes, isLinksOrLTAR, isSelfReferencingTableColumn, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
 import {
   IsFormInj,
   IsKanbanInj,
@@ -8,27 +8,39 @@ import {
   ReloadViewDataHookInj,
   computed,
   inject,
+  isJSON,
+  isTextArea,
   message,
   onMounted,
   ref,
   uiTypes,
+  useBase,
   useColumnCreateStoreOrThrow,
-  useEventListener,
   useGlobal,
   useI18n,
   useMetas,
   useNuxtApp,
   watchEffect,
 } from '#imports'
-import MdiPlusIcon from '~icons/mdi/plus-circle-outline'
 import MdiMinusIcon from '~icons/mdi/minus-circle-outline'
 import MdiIdentifierIcon from '~icons/mdi/identifier'
 
 const props = defineProps<{
+  preload?: Partial<ColumnType>
   columnPosition?: Pick<ColumnReqType, 'column_order'>
+  // Disable styles like border, shadow to be embedded on other components
+  embedMode?: boolean
+  // Will be used to show where ever text 'Column' is used.
+  // i.e 'Column Name' label in form, thus will be of form `${columnLabel} Name`
+  columnLabel?: string
+  hideTitle?: boolean
+  hideType?: boolean
+  hideAdditionalOptions?: boolean
+  fromTableExplorer?: boolean
+  readonly?: boolean
 }>()
 
-const emit = defineEmits(['submit', 'cancel'])
+const emit = defineEmits(['submit', 'cancel', 'mounted', 'add', 'update'])
 
 const { formState, generateNewColumnMeta, addOrUpdate, onAlter, onUidtOrIdTypeChange, validateInfos, isEdit } =
   useColumnCreateStoreOrThrow()
@@ -37,11 +49,17 @@ const { getMeta } = useMetas()
 
 const { t } = useI18n()
 
+const columnLabel = computed(() => props.columnLabel || t('objects.field'))
+
 const { $e } = useNuxtApp()
 
 const { appInfo } = useGlobal()
 
 const { betaFeatureToggleState } = useBetaFeatureToggle()
+
+const { openedViewsTab } = storeToRefs(useViewsStore())
+
+const { predictColumnType: _predictColumnType } = useNocoEe()
 
 const meta = inject(MetaInj, ref())
 
@@ -49,23 +67,46 @@ const isForm = inject(IsFormInj, ref(false))
 
 const isKanban = inject(IsKanbanInj, ref(false))
 
+const readOnly = computed(() => props.readonly)
+
+const { isMysql, isMssql, isXcdbBase } = useBase()
+
 const reloadDataTrigger = inject(ReloadViewDataHookInj)
 
 const advancedOptions = ref(false)
 
-const advancedDbOptions = ref(false)
+const mounted = ref(false)
 
 const columnToValidate = [UITypes.Email, UITypes.URL, UITypes.PhoneNumber]
 
-const onlyNameUpdateOnEditColumns = [UITypes.LinkToAnotherRecord, UITypes.Lookup, UITypes.Rollup]
+const onlyNameUpdateOnEditColumns = [
+  UITypes.LinkToAnotherRecord,
+  UITypes.Lookup,
+  UITypes.Rollup,
+  UITypes.Links,
+  UITypes.CreatedTime,
+  UITypes.LastModifiedTime,
+  UITypes.CreatedBy,
+  UITypes.LastModifiedBy,
+]
+
+// To close column type dropdown on escape and
+// close modal only when the type popup is close
+const isColumnTypeOpen = ref(false)
 
 const geoDataToggleCondition = (t: { name: UITypes }) => {
+  if (!appInfo.value.ee) return true
+
   return betaFeatureToggleState.show ? betaFeatureToggleState.show : !t.name.includes(UITypes.GeoData)
 }
 
+const showDeprecated = ref(false)
+
 const uiTypesOptions = computed<typeof uiTypes>(() => {
   return [
-    ...uiTypes.filter((t) => geoDataToggleCondition(t) && (!isEdit.value || !t.virtual)),
+    ...uiTypes
+      .filter((t) => geoDataToggleCondition(t) && (!isEdit.value || !t.virtual) && (!t.deprecated || showDeprecated.value))
+      .filter((t) => !(t.name === UITypes.SpecificDBType && isXcdbBase(meta.value?.source_id))),
     ...(!isEdit.value && meta?.value?.columns?.every((c) => !c.pk)
       ? [
           {
@@ -89,6 +130,8 @@ const reloadMetaAndData = async () => {
 const saving = ref(false)
 
 async function onSubmit() {
+  if (readOnly.value) return
+
   saving.value = true
   const saved = await addOrUpdate(reloadMetaAndData, props.columnPosition)
   saving.value = false
@@ -109,7 +152,7 @@ async function onSubmit() {
 // focus and select the column name field
 const antInput = ref()
 watchEffect(() => {
-  if (antInput.value && formState.value) {
+  if (antInput.value && formState.value && !readOnly.value) {
     // todo: replace setTimeout
     setTimeout(() => {
       // focus and select input only if active element is not an input or textarea
@@ -129,134 +172,295 @@ onMounted(() => {
     if (formState.value.pk) {
       message.info(t('msg.info.editingPKnotSupported'))
       emit('cancel')
+    } else if (isSystemColumn(formState.value) && !isSelfReferencingTableColumn(formState.value)) {
+      message.info(t('msg.info.editingSystemKeyNotSupported'))
+      emit('cancel')
+    }
+  }
+
+  if (props.preload) {
+    const { colOptions, ...others } = props.preload
+    formState.value = {
+      ...formState.value,
+      ...others,
+    }
+    if (colOptions) {
+      onUidtOrIdTypeChange()
+      formState.value = {
+        ...formState.value,
+        colOptions: {
+          ...colOptions,
+        },
+      }
     }
   }
 
   // for cases like formula
-  if (formState.value && !formState.value.column_name) {
+  if (formState.value && !formState.value.column_name && !isLinksOrLTAR(formState.value)) {
     formState.value.column_name = formState.value?.title
   }
+
+  nextTick(() => {
+    mounted.value = true
+    emit('mounted')
+    if (!isEdit.value) {
+      if (!formState.value?.temp_id) {
+        emit('add', formState.value)
+      }
+    }
+
+    if (isForm.value && !props.fromTableExplorer) {
+      setTimeout(() => {
+        antInput.value?.focus()
+        antInput.value?.select()
+      }, 100)
+    }
+  })
 })
 
-useEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    emit('cancel')
-  }
+const handleEscape = (event: KeyboardEvent): void => {
+  if (isColumnTypeOpen.value) return
+
+  if (event.key === 'Escape') emit('cancel')
+}
+
+const isFieldsTab = computed(() => {
+  return openedViewsTab.value === 'field'
 })
+
+const onDropdownChange = (value: boolean) => {
+  if (value) {
+    isColumnTypeOpen.value = value
+  } else {
+    setTimeout(() => {
+      isColumnTypeOpen.value = value
+    }, 300)
+  }
+}
+
+if (props.fromTableExplorer) {
+  watch(
+    formState,
+    () => {
+      if (mounted.value) emit('update', formState.value)
+    },
+    { deep: true },
+  )
+}
 </script>
 
 <template>
   <div
-    class="w-[400px] bg-gray-50 shadow p-4 overflow-auto border"
-    :class="{ '!w-[600px]': formState.uidt === UITypes.Formula, '!w-[500px]': formState.uidt === UITypes.Attachment }"
+    class="overflow-auto"
+    :class="{
+      'bg-white': !props.fromTableExplorer,
+      'w-[400px]': !props.embedMode,
+      '!w-146': isTextArea(formState) && formState.meta?.richMode,
+      '!w-116 overflow-visible': formState.uidt === UITypes.Formula && !props.embedMode,
+      '!w-[500px]': formState.uidt === UITypes.Attachment && !props.embedMode && !appInfo.ee,
+      'shadow-lg border-1 border-gray-200 shadow-gray-300 rounded-xl p-6': !embedMode,
+    }"
+    @keydown="handleEscape"
     @click.stop
   >
     <a-form v-model="formState" no-style name="column-create-or-edit" layout="vertical" data-testid="add-or-edit-column">
       <div class="flex flex-col gap-2">
-        <a-form-item :label="$t('labels.columnName')" v-bind="validateInfos.title">
+        <a-form-item v-if="isFieldsTab" v-bind="validateInfos.title" class="flex flex-grow">
+          <div
+            class="flex flex-grow px-2 py-1 items-center rounded-md bg-gray-100 focus:bg-gray-100 outline-none"
+            style="outline-style: solid; outline-width: thin"
+          >
+            <input
+              ref="antInput"
+              v-model="formState.title"
+              :disabled="readOnly"
+              class="flex flex-grow nc-fields-input text-lg font-bold outline-none bg-inherit"
+              :contenteditable="true"
+            />
+          </div>
+        </a-form-item>
+        <a-form-item
+          v-if="!props.hideTitle && !isFieldsTab"
+          :label="`${columnLabel} ${$t('general.name')}`"
+          v-bind="validateInfos.title"
+          :required="false"
+        >
           <a-input
             ref="antInput"
             v-model:value="formState.title"
-            class="nc-column-name-input"
-            :disabled="isKanban"
+            class="nc-column-name-input !rounded-md !mt-1"
+            :disabled="isKanban || readOnly"
             @input="onAlter(8)"
           />
         </a-form-item>
 
-        <a-form-item
-          v-if="!(isEdit && !!onlyNameUpdateOnEditColumns.find((col) => col === formState.uidt))"
-          :label="$t('labels.columnType')"
-        >
-          <a-select
-            v-model:value="formState.uidt"
-            show-search
-            class="nc-column-type-input"
-            :disabled="isKanban"
-            dropdown-class-name="nc-dropdown-column-type"
-            @change="onUidtOrIdTypeChange"
+        <div class="flex items-center gap-1">
+          <a-form-item
+            v-if="!props.hideType && !(isEdit && !!onlyNameUpdateOnEditColumns.find((col) => col === formState.uidt))"
+            class="flex-1"
+            :label="`${columnLabel} ${$t('general.type')}`"
           >
-            <a-select-option v-for="opt of uiTypesOptions" :key="opt.name" :value="opt.name" v-bind="validateInfos.uidt">
-              <div class="flex gap-1 items-center">
-                <component :is="opt.icon" class="text-grey" />
-                {{ opt.name }}
-              </div>
-            </a-select-option>
-          </a-select>
-        </a-form-item>
+            <div class="h-1 w-full"></div>
+            <a-select
+              v-model:value="formState.uidt"
+              show-search
+              class="nc-column-type-input !rounded-md"
+              :disabled="isKanban || readOnly"
+              dropdown-class-name="nc-dropdown-column-type border-1 !rounded-md border-gray-200"
+              @dropdown-visible-change="onDropdownChange"
+              @change="onUidtOrIdTypeChange"
+              @dblclick="showDeprecated = !showDeprecated"
+            >
+              <template #suffixIcon>
+                <GeneralIcon icon="arrowDown" class="text-gray-700" />
+              </template>
+              <a-select-option v-for="opt of uiTypesOptions" :key="opt.name" :value="opt.name" v-bind="validateInfos.uidt">
+                <div class="flex gap-2 items-center">
+                  <component :is="opt.icon" class="text-gray-700 w-4 h-4" />
+                  <div class="flex-1">{{ opt.name }}</div>
+                  <span v-if="opt.deprecated" class="!text-xs !text-gray-300">({{ $t('general.deprecated') }})</span>
+                  <component
+                    :is="iconMap.check"
+                    v-if="formState.uidt === opt.name"
+                    id="nc-selected-item-icon"
+                    class="text-primary w-4 h-4"
+                  />
+                </div>
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <!-- <div v-if="isEeUI && !props.hideType" class="mt-2 cursor-pointer" @click="predictColumnType()">
+            <GeneralIcon icon="magic" :class="{ 'nc-animation-pulse': loadMagic }" class="w-full flex mt-2 text-orange-400" />
+          </div> -->
+        </div>
 
-        <LazySmartsheetColumnFormulaOptions v-if="formState.uidt === UITypes.Formula" v-model:value="formState" />
-        <LazySmartsheetColumnQrCodeOptions v-if="formState.uidt === UITypes.QrCode" v-model="formState" />
-        <LazySmartsheetColumnBarcodeOptions v-if="formState.uidt === UITypes.Barcode" v-model="formState" />
-        <LazySmartsheetColumnCurrencyOptions v-if="formState.uidt === UITypes.Currency" v-model:value="formState" />
-        <LazySmartsheetColumnGeoDataOptions v-if="formState.uidt === UITypes.GeoData" v-model:value="formState" />
-        <LazySmartsheetColumnDurationOptions v-if="formState.uidt === UITypes.Duration" v-model:value="formState" />
-        <LazySmartsheetColumnRatingOptions v-if="formState.uidt === UITypes.Rating" v-model:value="formState" />
-        <LazySmartsheetColumnCheckboxOptions v-if="formState.uidt === UITypes.Checkbox" v-model:value="formState" />
-        <LazySmartsheetColumnLookupOptions v-if="formState.uidt === UITypes.Lookup" v-model:value="formState" />
-        <LazySmartsheetColumnDateOptions v-if="formState.uidt === UITypes.Date" v-model:value="formState" />
-        <LazySmartsheetColumnDateTimeOptions v-if="formState.uidt === UITypes.DateTime" v-model:value="formState" />
-        <LazySmartsheetColumnRollupOptions v-if="formState.uidt === UITypes.Rollup" v-model:value="formState" />
-        <LazySmartsheetColumnLinkedToAnotherRecordOptions
-          v-if="!isEdit && formState.uidt === UITypes.LinkToAnotherRecord"
-          v-model:value="formState"
-        />
-        <LazySmartsheetColumnSpecificDBTypeOptions v-if="formState.uidt === UITypes.SpecificDBType" />
-        <LazySmartsheetColumnSelectOptions
-          v-if="formState.uidt === UITypes.SingleSelect || formState.uidt === UITypes.MultiSelect"
-          v-model:value="formState"
-        />
+        <template v-if="!readOnly">
+          <LazySmartsheetColumnFormulaOptions v-if="formState.uidt === UITypes.Formula" v-model:value="formState" />
+          <LazySmartsheetColumnQrCodeOptions v-if="formState.uidt === UITypes.QrCode" v-model="formState" />
+          <LazySmartsheetColumnBarcodeOptions v-if="formState.uidt === UITypes.Barcode" v-model="formState" />
+          <LazySmartsheetColumnCurrencyOptions v-if="formState.uidt === UITypes.Currency" v-model:value="formState" />
+          <LazySmartsheetColumnLongTextOptions v-if="formState.uidt === UITypes.LongText" v-model:value="formState" />
+          <LazySmartsheetColumnDurationOptions v-if="formState.uidt === UITypes.Duration" v-model:value="formState" />
+          <LazySmartsheetColumnRatingOptions v-if="formState.uidt === UITypes.Rating" v-model:value="formState" />
+          <LazySmartsheetColumnCheckboxOptions v-if="formState.uidt === UITypes.Checkbox" v-model:value="formState" />
+          <LazySmartsheetColumnLookupOptions v-if="formState.uidt === UITypes.Lookup" v-model:value="formState" />
+          <LazySmartsheetColumnDateOptions v-if="formState.uidt === UITypes.Date" v-model:value="formState" />
+          <LazySmartsheetColumnDecimalOptions v-if="formState.uidt === UITypes.Decimal" v-model:value="formState" />
+          <LazySmartsheetColumnDateTimeOptions v-if="formState.uidt === UITypes.DateTime" v-model:value="formState" />
+          <LazySmartsheetColumnRollupOptions v-if="formState.uidt === UITypes.Rollup" v-model:value="formState" />
+          <LazySmartsheetColumnLinkedToAnotherRecordOptions
+            v-if="!isEdit && (formState.uidt === UITypes.LinkToAnotherRecord || formState.uidt === UITypes.Links)"
+            :key="formState.uidt"
+            v-model:value="formState"
+          />
+          <LazySmartsheetColumnLinkOptions v-if="isEdit && formState.uidt === UITypes.Links" v-model:value="formState" />
+          <LazySmartsheetColumnPercentOptions v-if="formState.uidt === UITypes.Percent" v-model:value="formState" />
+          <LazySmartsheetColumnSpecificDBTypeOptions v-if="formState.uidt === UITypes.SpecificDBType" />
+          <LazySmartsheetColumnUserOptions v-if="formState.uidt === UITypes.User" v-model:value="formState" :is-edit="isEdit" />
+          <SmartsheetColumnSelectOptions
+            v-if="formState.uidt === UITypes.SingleSelect || formState.uidt === UITypes.MultiSelect"
+            v-model:value="formState"
+            :from-table-explorer="props.fromTableExplorer || false"
+          />
+        </template>
       </div>
-
-      <div
-        v-if="!isVirtualCol(formState.uidt)"
-        class="text-xs cursor-pointer text-gray-400 nc-more-options mb-1 mt-4 flex items-center gap-1 justify-end"
-        @click="advancedOptions = !advancedOptions"
-        @dblclick="advancedDbOptions = !advancedDbOptions"
+      <a-checkbox
+        v-if="formState.meta && columnToValidate.includes(formState.uidt)"
+        v-model:checked="formState.meta.validate"
+        class="ml-1 mb-1"
       >
-        {{ advancedOptions ? $t('general.hideAll') : $t('general.showMore') }}
-        <component :is="advancedOptions ? MdiMinusIcon : MdiPlusIcon" />
-      </div>
+        <span class="text-[10px] text-gray-600">
+          {{ `${$t('msg.acceptOnlyValid')} ${formState.uidt}` }}
+        </span>
+      </a-checkbox>
+      <template v-if="!readOnly">
+        <div class="!my-3">
+          <!--
+            Default Value for JSON & LongText is not supported in MySQL
+            Default Value is Disabled for MSSQL -->
+          <LazySmartsheetColumnRichLongTextDefaultValue
+            v-if="isTextArea(formState) && formState.meta?.richMode"
+            v-model:value="formState"
+          />
+          <LazySmartsheetColumnDefaultValue
+            v-else-if="
+          !isVirtualCol(formState) &&
+          !isAttachment(formState) &&
+          !isMssql(meta!.source_id) &&
+          !(isMysql(meta!.source_id) && (isJSON(formState) || isTextArea(formState)))
+          "
+            v-model:value="formState"
+          />
+        </div>
 
-      <Transition name="layout" mode="out-in">
-        <div v-if="advancedOptions" class="overflow-hidden">
-          <a-checkbox
-            v-if="formState.meta && columnToValidate.includes(formState.uidt)"
-            v-model:checked="formState.meta.validate"
-            class="ml-1 mb-1"
+        <div
+          v-if="!props.hideAdditionalOptions && !isVirtualCol(formState.uidt)&&!(!appInfo.ee && isAttachment(formState)) && (!appInfo.ee || (appInfo.ee && !isXcdbBase(meta!.source_id) && formState.uidt === UITypes.SpecificDBType))"
+          class="text-xs cursor-pointer text-gray-400 nc-more-options mb-1 mt-4 flex items-center gap-1 justify-end"
+          @click="advancedOptions = !advancedOptions"
+        >
+          {{ advancedOptions ? $t('general.hideAll') : $t('general.showMore') }}
+          <component :is="advancedOptions ? MdiMinusIcon : MdiPlusIcon" />
+        </div>
+
+        <Transition name="layout" mode="out-in">
+          <div v-if="advancedOptions" class="overflow-hidden">
+            <LazySmartsheetColumnAttachmentOptions v-if="appInfo.ee && isAttachment(formState)" v-model:value="formState" />
+
+            <LazySmartsheetColumnAdvancedOptions
+              v-if="formState.uidt !== UITypes.Attachment"
+              v-model:value="formState"
+              :advanced-db-options="advancedOptions || formState.uidt === UITypes.SpecificDBType"
+            />
+          </div>
+        </Transition>
+      </template>
+
+      <template v-if="props.fromTableExplorer">
+        <a-form-item></a-form-item>
+      </template>
+      <template v-else>
+        <a-form-item>
+          <div
+            class="flex gap-x-2 justify-between"
+            :class="{
+              'mt-6': props.hideAdditionalOptions,
+              'mt-2': !props.hideAdditionalOptions,
+              'justify-end': !props.embedMode,
+            }"
           >
-            <span class="text-[10px] text-gray-600">
-              {{ `Accept only valid ${formState.uidt}` }}
-            </span>
-          </a-checkbox>
-
-          <LazySmartsheetColumnAttachmentOptions
-            v-if="appInfo.ee && formState.uidt === UITypes.Attachment"
-            v-model:value="formState"
-          />
-
-          <LazySmartsheetColumnAdvancedOptions
-            v-model:value="formState"
-            :advanced-db-options="advancedDbOptions || formState.uidt === UITypes.SpecificDBType"
-          />
-        </div>
-      </Transition>
-
-      <a-form-item>
-        <div class="flex justify-end gap-1 mt-4">
-          <a-button html-type="button" @click="emit('cancel')">
             <!-- Cancel -->
-            {{ $t('general.cancel') }}
-          </a-button>
+            <NcButton size="small" class="w-full" html-type="button" type="secondary" @click="emit('cancel')">
+              {{ $t('general.cancel') }}
+            </NcButton>
 
-          <a-button html-type="submit" type="primary" :loading="saving" @click.prevent="onSubmit">
             <!-- Save -->
-            {{ $t('general.save') }}
-          </a-button>
-        </div>
-      </a-form-item>
+            <NcButton
+              class="w-full"
+              html-type="submit"
+              type="primary"
+              :loading="saving"
+              size="small"
+              :label="`${$t('general.save')} ${columnLabel}`"
+              :loading-label="`${$t('general.saving')} ${columnLabel}`"
+              @click.prevent="onSubmit"
+            >
+              {{ $t('general.save') }} {{ columnLabel }}
+              <template #loading> {{ $t('general.saving') }} {{ columnLabel }} </template>
+            </NcButton>
+          </div>
+        </a-form-item>
+      </template>
     </a-form>
   </div>
 </template>
+
+<style lang="scss">
+.nc-column-type-input {
+  .ant-select-selector {
+    @apply !rounded-md;
+  }
+}
+</style>
 
 <style scoped>
 :deep(.ant-form-item-label > label) {

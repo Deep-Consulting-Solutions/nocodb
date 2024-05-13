@@ -1,24 +1,24 @@
 import { ViewTypes } from 'nocodb-sdk'
-import { iconMap } from '~/utils/iconUtils'
-
+import { iconMap } from './iconUtils'
 import type { Language } from '~/lib'
 
 export const viewIcons: Record<number | string, { icon: any; color: string }> = {
-  [ViewTypes.GRID]: { icon: iconMap.grid, color: '#2b39f3' },
-  [ViewTypes.FORM]: { icon: iconMap.form, color: '#c00145' },
-  calendar: { icon: iconMap.calendar, color: 'purple' },
-  [ViewTypes.GALLERY]: { icon: iconMap.gallery, color: '#bd4200' },
+  [ViewTypes.GRID]: { icon: iconMap.grid, color: '#36BFFF' },
+  [ViewTypes.FORM]: { icon: iconMap.form, color: '#7D26CD' },
+  [ViewTypes.CALENDAR]: { icon: iconMap.calendar, color: '#B33771' },
+  [ViewTypes.GALLERY]: { icon: iconMap.gallery, color: '#FC3AC6' },
   [ViewTypes.MAP]: { icon: iconMap.map, color: 'blue' },
-  [ViewTypes.KANBAN]: { icon: iconMap.kanban, color: '#007300' },
+  [ViewTypes.KANBAN]: { icon: iconMap.kanban, color: '#FF9052' },
   view: { icon: iconMap.view, color: 'blue' },
 }
 
 export const viewTypeAlias: Record<number, string> = {
   [ViewTypes.GRID]: 'grid',
   [ViewTypes.FORM]: 'form',
-  [ViewTypes.GALLERY]: 'gaallery',
+  [ViewTypes.GALLERY]: 'gallery',
   [ViewTypes.KANBAN]: 'kanban',
   [ViewTypes.MAP]: 'map',
+  [ViewTypes.CALENDAR]: 'calendar',
 }
 
 export const isRtlLang = (lang: keyof typeof Language) => ['fa', 'ar'].includes(lang)
@@ -38,4 +38,8 @@ export const getViewIcon = (key?: string | number) => {
   if (!key) return
 
   return viewIcons[key]
+}
+
+export function applyNonSelectable() {
+  document.body.classList.add('non-selectable')
 }

@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import type { RequestParams } from 'nocodb-sdk'
 import { ExportTypes } from 'nocodb-sdk'
-import { storeToRefs } from 'pinia'
+import { saveAs } from 'file-saver'
+import * as XLSX from 'xlsx'
 import {
   ActiveViewInj,
   FieldsInj,
@@ -12,12 +13,13 @@ import {
   inject,
   message,
   ref,
+  storeToRefs,
+  useBase,
   useI18n,
   useNuxtApp,
-  useProject,
+  useRoles,
   useSharedView,
   useSmartsheetStoreOrThrow,
-  useUIPermission,
 } from '#imports'
 
 const { t } = useI18n()
@@ -28,7 +30,7 @@ const isPublicView = inject(IsPublicInj, ref(false))
 
 const isView = false
 
-const { project } = storeToRefs(useProject())
+const { base } = storeToRefs(useBase())
 
 const { $api } = useNuxtApp()
 
@@ -48,15 +50,12 @@ const showWebhookDrawer = ref(false)
 
 const quickImportDialog = ref(false)
 
-const { isUIAllowed } = useUIPermission()
+const { isUIAllowed } = useRoles()
 
 const exportFile = async (exportType: ExportTypes) => {
   let offset = 0
   let c = 1
   const responseType = exportType === ExportTypes.EXCEL ? 'base64' : 'blob'
-
-  const XLSX = await import('xlsx')
-  const FileSaver = await import('file-saver')
 
   try {
     while (!isNaN(offset) && offset > -1) {
@@ -66,9 +65,9 @@ const exportFile = async (exportType: ExportTypes) => {
       } else {
         res = await $api.dbViewRow.export(
           'noco',
-          project?.value.title as string,
-          meta.value?.title as string,
-          selectedView.value?.title as string,
+          base?.value.id as string,
+          meta.value?.id as string,
+          selectedView.value?.id as string,
           exportType,
           {
             responseType,
@@ -87,7 +86,7 @@ const exportFile = async (exportType: ExportTypes) => {
         XLSX.writeFile(workbook, `${meta.value?.title}_exported_${c++}.xlsx`)
       } else if (exportType === ExportTypes.CSV) {
         const blob = new Blob([data], { type: 'text/plain;charset=utf-8' })
-        FileSaver.saveAs(blob, `${meta.value?.title}_exported_${c++}.csv`)
+        saveAs(blob, `${meta.value?.title}_exported_${c++}.csv`)
       }
       offset = +headers['nc-export-offset']
       if (offset > -1) {
@@ -146,7 +145,7 @@ const exportFile = async (exportType: ExportTypes) => {
             </div>
 
             <div
-              v-if="isUIAllowed('sharedViewList') && !isView && !isPublicView"
+              v-if="isUIAllowed('viewShare') && !isView && !isPublicView"
               v-e="['a:actions:shared-view-list']"
               class="nc-menu-item"
               @click="sharedViewListDlg = true"

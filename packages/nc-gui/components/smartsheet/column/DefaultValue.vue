@@ -1,0 +1,70 @@
+<script lang="ts" setup>
+import { UITypes } from 'nocodb-sdk'
+import { iconMap } from '#imports'
+
+const props = defineProps<{
+  value: any
+}>()
+const emits = defineEmits(['update:value'])
+
+provide(EditColumnInj, ref(true))
+
+const vModel = useVModel(props, 'value', emits)
+const rowRef = ref({
+  row: {},
+  oldRow: {},
+  rowMeta: {
+    isUpdatedFromCopyNPaste: [vModel.value?.title],
+  },
+})
+
+useProvideSmartsheetRowStore(rowRef)
+
+const cdfValue = ref<string | null>(null)
+
+const editEnabled = ref(false)
+
+const updateCdfValue = (cdf: string | null) => {
+  vModel.value = { ...vModel.value, cdf }
+  cdfValue.value = cdf
+}
+
+onMounted(() => {
+  updateCdfValue(vModel.value?.cdf ? vModel.value.cdf : null)
+})
+
+watch(
+  () => vModel.value.cdf,
+  (newValue) => {
+    cdfValue.value = newValue
+  },
+)
+</script>
+
+<template>
+  <div class="!my-3 text-xs">{{ $t('placeholder.defaultValue') }}</div>
+  <div class="flex flex-row gap-2">
+    <div
+      class="border-1 flex items-center w-full px-3 my-[-4px] border-gray-300 rounded-md sm:min-h-[32px] xs:min-h-13 flex items-center focus-within:(border-brand-500 shadow-none ring-0)"
+      :class="{
+        '!border-brand-500': editEnabled,
+      }"
+    >
+      <LazySmartsheetCell
+        :edit-enabled="true"
+        :model-value="cdfValue"
+        :column="vModel"
+        class="!border-none h-auto my-auto"
+        @update:cdf="updateCdfValue"
+        @update:edit-enabled="editEnabled = $event"
+        @click="editEnabled = true"
+      />
+      <component
+        :is="iconMap.close"
+        v-if="![UITypes.Year, UITypes.SingleSelect, UITypes.MultiSelect].includes(vModel.uidt)"
+        class="w-4 h-4 cursor-pointer rounded-full !text-black-500 text-gray-500 cursor-pointer hover:bg-gray-50"
+        @click="updateCdfValue(null)"
+      />
+    </div>
+  </div>
+</template>

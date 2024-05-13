@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import type { SelectProps } from 'ant-design-vue'
 import type { ColumnType, LinkToAnotherRecordType } from 'nocodb-sdk'
-import { RelationTypes, UITypes, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
-import { ActiveViewInj, MetaInj, computed, inject, ref, resolveComponent, useViewColumns } from '#imports'
+import { RelationTypes, UITypes, isHiddenCol, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
+import { MetaInj, computed, inject, ref, resolveComponent, useViewColumnsOrThrow } from '#imports'
 
-const { modelValue, isSort } = defineProps<{
+const { modelValue, isSort, allowEmpty, ...restProps } = defineProps<{
   modelValue?: string
   isSort?: boolean
+  columns?: ColumnType[]
+  allowEmpty?: boolean
 }>()
 
 const emit = defineEmits(['update:modelValue'])
+
+const customColumns = toRef(restProps, 'columns')
 
 const meta = inject(MetaInj, ref())
 
@@ -18,14 +22,29 @@ const localValue = computed({
   set: (val) => emit('update:modelValue', val),
 })
 
-const activeView = inject(ActiveViewInj, ref())
-
-const { showSystemFields, metaColumnById } = useViewColumns(activeView, meta)
+const { showSystemFields, metaColumnById } = useViewColumnsOrThrow()
 
 const options = computed<SelectProps['options']>(() =>
-  meta.value?.columns
-    ?.filter((c: ColumnType) => {
+  (
+    customColumns.value?.filter((c: ColumnType) => {
       if (isSystemColumn(metaColumnById?.value?.[c.id!])) {
+        if (isHiddenCol(c)) {
+          /** ignore mm relation column, created by and last modified by system field */
+          return false
+        }
+      }
+      return true
+    }) ||
+    meta.value?.columns?.filter((c: ColumnType) => {
+      if (c.uidt === UITypes.Links) {
+        return true
+      }
+      if (isSystemColumn(metaColumnById?.value?.[c.id!])) {
+        if (isHiddenCol(c)) {
+          /** ignore mm relation column, created by and last modified by system field */
+          return false
+        }
+
         return (
           /** if the field is used in filter, then show it anyway */
           localValue.value === c.id ||
@@ -36,38 +55,36 @@ const options = computed<SelectProps['options']>(() =>
         return false
       } else if (isSort) {
         /** ignore hasmany and manytomany relations if it's using within sort menu */
-        return !(
-          c.uidt === UITypes.LinkToAnotherRecord && (c.colOptions as LinkToAnotherRecordType).type !== RelationTypes.BELONGS_TO
-        )
+        return !(isLinksOrLTAR(c) && (c.colOptions as LinkToAnotherRecordType).type !== RelationTypes.BELONGS_TO)
         /** ignore virtual fields which are system fields ( mm relation ) and qr code fields */
       } else {
         const isVirtualSystemField = c.colOptions && c.system
         return !isVirtualSystemField
       }
     })
-    .map((c: ColumnType) => ({
-      value: c.id,
-      label: c.title,
-      icon: h(
-        isVirtualCol(c) ? resolveComponent('SmartsheetHeaderVirtualCellIcon') : resolveComponent('SmartsheetHeaderCellIcon'),
-        {
-          columnMeta: c,
-        },
-      ),
-      c,
-    })),
+  )?.map((c: ColumnType) => ({
+    value: c.id,
+    label: c.title,
+    icon: h(
+      isVirtualCol(c) ? resolveComponent('SmartsheetHeaderVirtualCellIcon') : resolveComponent('SmartsheetHeaderCellIcon'),
+      {
+        columnMeta: c,
+      },
+    ),
+    c,
+  })),
 )
 
 const filterOption = (input: string, option: any) => option.label.toLowerCase()?.includes(input.toLowerCase())
 
 // when a new filter is created, select a field by default
-if (!localValue.value) {
+if (!localValue.value && allowEmpty !== true) {
   localValue.value = (options.value?.[0].value as string) || ''
 }
 </script>
 
 <template>
-  <a-select
+  <NcSelect
     v-model:value="localValue"
     :dropdown-match-select-width="false"
     show-search
@@ -76,13 +93,29 @@ if (!localValue.value) {
     dropdown-class-name="nc-dropdown-toolbar-field-list"
   >
     <a-select-option v-for="option in options" :key="option.value" :label="option.label" :value="option.value">
-      <div class="flex gap-2 items-center items-center h-full">
-        <component :is="option.icon" class="min-w-5 !mx-0" />
-
-        <span class="min-w-0"> {{ option.label }}</span>
+      <div class="flex items-center w-full justify-between w-full gap-2 max-w-50">
+        <div class="flex gap-1.5 flex-1 items-center truncate items-center h-full">
+          <component :is="option.icon" class="!w-3.5 !h-3.5 !mx-0 !text-gray-500" />
+          <NcTooltip
+            :style="{ wordBreak: 'keep-all', whiteSpace: 'nowrap', display: 'inline' }"
+            class="max-w-[15rem] truncate select-none"
+            show-on-truncate-only
+          >
+            <template #title> {{ option.label }}</template>
+            <span>
+              {{ option.label }}
+            </span>
+          </NcTooltip>
+        </div>
+        <component
+          :is="iconMap.check"
+          v-if="localValue === option.value"
+          id="nc-selected-item-icon"
+          class="text-primary w-4 h-4"
+        />
       </div>
     </a-select-option>
-  </a-select>
+  </NcSelect>
 </template>
 
 <style lang="scss">

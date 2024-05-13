@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import type { VNodeRef } from '@vue/runtime-core'
-import { ColumnInj, EditModeInj, computed, inject, parseProp, useVModel } from '#imports'
+import {
+  ColumnInj,
+  EditColumnInj,
+  EditModeInj,
+  IsExpandedFormOpenInj,
+  IsFormInj,
+  ReadonlyInj,
+  computed,
+  inject,
+  parseProp,
+  useVModel,
+} from '#imports'
 
 interface Props {
   modelValue: number | null | undefined
@@ -15,6 +26,10 @@ const { showNull } = useGlobal()
 const column = inject(ColumnInj)!
 
 const editEnabled = inject(EditModeInj)!
+
+const isEditColumn = inject(EditColumnInj, ref(false))
+
+const readOnly = inject(ReadonlyInj, ref(false))
 
 const _vModel = useVModel(props, 'modelValue', emit)
 
@@ -41,25 +56,45 @@ const currencyMeta = computed(() => {
 
 const currency = computed(() => {
   try {
-    return !vModel.value || isNaN(vModel.value)
-      ? vModel.value
-      : new Intl.NumberFormat(currencyMeta.value.currency_locale || 'en-US', {
-          style: 'currency',
-          currency: currencyMeta.value.currency_code || 'USD',
-        }).format(vModel.value)
+    if (vModel.value === null || vModel.value === undefined || isNaN(vModel.value)) {
+      return vModel.value
+    }
+    return new Intl.NumberFormat(currencyMeta.value.currency_locale || 'en-US', {
+      style: 'currency',
+      currency: currencyMeta.value.currency_code || 'USD',
+    }).format(vModel.value)
   } catch (e) {
     return vModel.value
   }
 })
 
-const focus: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))!
+
+const isForm = inject(IsFormInj)!
+
+const focus: VNodeRef = (el) =>
+  !isExpandedFormOpen.value && !isEditColumn.value && !isForm.value && (el as HTMLInputElement)?.focus()
 
 const submitCurrency = () => {
   if (lastSaved.value !== vModel.value) {
-    lastSaved.value = vModel.value
+    vModel.value = lastSaved.value = vModel.value ?? null
     emit('save')
   }
   editEnabled.value = false
+}
+
+const onBlur = () => {
+  // triggered by events like focus-out / pressing enter
+  // for non-firefox browsers only
+  submitCurrency()
+}
+
+const onKeydownEnter = () => {
+  // onBlur is never executed for firefox & safari
+  // we use keydown.enter to trigger submitCurrency
+  if (/(Firefox|Safari)/.test(navigator.userAgent)) {
+    submitCurrency()
+  }
 }
 
 onMounted(() => {
@@ -68,12 +103,25 @@ onMounted(() => {
 </script>
 
 <template>
+  <div
+    v-if="isForm && !isEditColumn"
+    class="nc-currency-code h-full !bg-gray-100 border-r border-gray-200 px-3 mr-1 flex items-center"
+  >
+    <span>
+      {{ currencyMeta.currency_code }}
+    </span>
+  </div>
   <input
-    v-if="editEnabled"
+    v-if="(!readOnly && editEnabled) || (isForm && !isEditColumn)"
     :ref="focus"
     v-model="vModel"
-    class="w-full h-full border-none outline-none px-2"
-    @blur="submitCurrency"
+    type="number"
+    class="nc-cell-field h-full border-none rounded-md py-1 outline-none focus:outline-none focus:ring-0"
+    :class="isForm && !isEditColumn ? 'flex flex-1' : 'w-full'"
+    :placeholder="isEditColumn ? $t('labels.optional') : ''"
+    :disabled="readOnly"
+    @blur="onBlur"
+    @keydown.enter="onKeydownEnter"
     @keydown.down.stop
     @keydown.left.stop
     @keydown.right.stop
@@ -84,9 +132,25 @@ onMounted(() => {
     @contextmenu.stop
   />
 
-  <span v-else-if="vModel === null && showNull" class="nc-null">NULL</span>
+  <span v-else-if="vModel === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
 
-  <span v-else-if="vModel">{{ currency }}</span>
+  <!-- only show the numeric value as previously string value was accepted -->
+  <span v-else-if="!isNaN(vModel)" class="nc-cell-field">{{ currency }}</span>
 
+  <!-- possibly unexpected string / null with showNull == false  -->
   <span v-else />
 </template>
+
+<style lang="scss" scoped>
+/* Chrome, Safari, Edge, Opera */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+</style>

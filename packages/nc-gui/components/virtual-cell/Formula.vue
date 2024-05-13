@@ -1,25 +1,45 @@
 <script lang="ts" setup>
+import { FormulaDataTypes, handleTZ } from 'nocodb-sdk'
 import type { ColumnType } from 'nocodb-sdk'
 import type { Ref } from 'vue'
-import { CellValueInj, ColumnInj, computed, handleTZ, inject, replaceUrlsWithLink, useProject } from '#imports'
+import {
+  CellValueInj,
+  ColumnInj,
+  IsExpandedFormOpenInj,
+  computed,
+  inject,
+  ref,
+  renderValue,
+  replaceUrlsWithLink,
+  useBase,
+  useShowNotEditableWarning,
+} from '#imports'
 
 // todo: column type doesn't have required property `error` - throws in typecheck
 const column = inject(ColumnInj) as Ref<ColumnType & { colOptions: { error: any } }>
 
 const cellValue = inject(CellValueInj)
 
-const { isPg } = useProject()
+const { isPg } = useBase()
 
-const result = computed(() => (isPg(column.value.base_id) ? handleTZ(cellValue?.value) : cellValue?.value))
+const result = computed(() =>
+  isPg(column.value.source_id) ? renderValue(handleTZ(cellValue?.value)) : renderValue(cellValue?.value),
+)
 
 const urls = computed(() => replaceUrlsWithLink(result.value))
 
 const { showEditNonEditableFieldWarning, showClearNonEditableFieldWarning, activateShowEditNonEditableFieldWarning } =
   useShowNotEditableWarning()
+
+const isNumber = computed(() => (column.value.colOptions as any)?.parsed_tree?.dataType === FormulaDataTypes.NUMERIC)
+
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))
+
+const isGrid = inject(IsGridInj, ref(false))
 </script>
 
 <template>
-  <div>
+  <div class="w-full" :class="{ 'text-right': isNumber && isGrid && !isExpandedFormOpen }">
     <a-tooltip v-if="column && column.colOptions && column.colOptions.error" placement="bottom" class="text-orange-700">
       <template #title>
         <span class="font-bold">{{ column.colOptions.error }}</span>
@@ -27,7 +47,7 @@ const { showEditNonEditableFieldWarning, showClearNonEditableFieldWarning, activ
       <span>ERR!</span>
     </a-tooltip>
 
-    <div v-else class="p-2" @dblclick="activateShowEditNonEditableFieldWarning">
+    <div v-else class="nc-cell-field py-1" @dblclick="activateShowEditNonEditableFieldWarning">
       <div v-if="urls" v-html="urls" />
 
       <div v-else>{{ result }}</div>

@@ -1,4 +1,5 @@
 import { ColumnReqType, ColumnType } from './Api';
+import { FormulaDataTypes } from './formulaHelpers';
 
 enum UITypes {
   ID = 'ID',
@@ -29,7 +30,7 @@ enum UITypes {
   Rollup = 'Rollup',
   Count = 'Count',
   DateTime = 'DateTime',
-  CreateTime = 'CreateTime',
+  CreatedTime = 'CreatedTime',
   LastModifiedTime = 'LastModifiedTime',
   AutoNumber = 'AutoNumber',
   Geometry = 'Geometry',
@@ -38,7 +39,56 @@ enum UITypes {
   Barcode = 'Barcode',
   QrCode = 'QrCode',
   Button = 'Button',
+  Links = 'Links',
+  User = 'User',
+  CreatedBy = 'CreatedBy',
+  LastModifiedBy = 'LastModifiedBy',
 }
+
+export const UITypesName = {
+  [UITypes.ID]: 'ID',
+  [UITypes.LinkToAnotherRecord]: 'Link to another record',
+  [UITypes.ForeignKey]: 'Foreign key',
+  [UITypes.Lookup]: 'Lookup',
+  [UITypes.SingleLineText]: 'Single line text',
+  [UITypes.LongText]: 'Long text',
+  RichText: 'Rich text',
+  [UITypes.Attachment]: 'Attachment',
+  [UITypes.Checkbox]: 'Checkbox',
+  [UITypes.MultiSelect]: 'Multi select',
+  [UITypes.SingleSelect]: 'Single select',
+  [UITypes.Collaborator]: 'Collaborator',
+  [UITypes.Date]: 'Date',
+  [UITypes.Year]: 'Year',
+  [UITypes.Time]: 'Time',
+  [UITypes.PhoneNumber]: 'Phone number',
+  [UITypes.GeoData]: 'Geo data',
+  [UITypes.Email]: 'Email',
+  [UITypes.URL]: 'URL',
+  [UITypes.Number]: 'Number',
+  [UITypes.Decimal]: 'Decimal',
+  [UITypes.Currency]: 'Currency',
+  [UITypes.Percent]: 'Percent',
+  [UITypes.Duration]: 'Duration',
+  [UITypes.Rating]: 'Rating',
+  [UITypes.Formula]: 'Formula',
+  [UITypes.Rollup]: 'Rollup',
+  [UITypes.Count]: 'Count',
+  [UITypes.DateTime]: 'Date time',
+  [UITypes.CreatedTime]: 'Created time',
+  [UITypes.LastModifiedTime]: 'Last modified time',
+  [UITypes.AutoNumber]: 'Auto number',
+  [UITypes.Geometry]: 'Geometry',
+  [UITypes.JSON]: 'JSON',
+  [UITypes.SpecificDBType]: 'Specific DB type',
+  [UITypes.Barcode]: 'Barcode',
+  [UITypes.QrCode]: 'Qr code',
+  [UITypes.Button]: 'Button',
+  [UITypes.Links]: 'Links',
+  [UITypes.User]: 'User',
+  [UITypes.CreatedBy]: 'Created by',
+  [UITypes.LastModifiedBy]: 'Last modified by',
+};
 
 export const numericUITypes = [
   UITypes.Duration,
@@ -49,6 +99,7 @@ export const numericUITypes = [
   UITypes.Rating,
   UITypes.Rollup,
   UITypes.Year,
+  UITypes.Links,
 ];
 
 export function isNumericCol(
@@ -79,8 +130,83 @@ export function isVirtualCol(
     UITypes.Barcode,
     UITypes.Rollup,
     UITypes.Lookup,
+    UITypes.Links,
+    UITypes.CreatedTime,
+    UITypes.LastModifiedTime,
+    UITypes.CreatedBy,
+    UITypes.LastModifiedBy,
     // UITypes.Count,
   ].includes(<UITypes>(typeof col === 'object' ? col?.uidt : col));
 }
 
+export function isCreatedOrLastModifiedTimeCol(
+  col:
+    | UITypes
+    | { readonly uidt: UITypes | string }
+    | ColumnReqType
+    | ColumnType
+) {
+  return [UITypes.CreatedTime, UITypes.LastModifiedTime].includes(
+    <UITypes>(typeof col === 'object' ? col?.uidt : col)
+  );
+}
+
+export function isCreatedOrLastModifiedByCol(
+  col:
+    | UITypes
+    | { readonly uidt: UITypes | string }
+    | ColumnReqType
+    | ColumnType
+) {
+  return [UITypes.CreatedBy, UITypes.LastModifiedBy].includes(
+    <UITypes>(typeof col === 'object' ? col?.uidt : col)
+  );
+}
+
+export function isHiddenCol(
+  col: (ColumnReqType | ColumnType) & { system?: number | boolean }
+) {
+  return (
+    col.system &&
+    (
+      [
+        UITypes.CreatedBy,
+        UITypes.LastModifiedBy,
+        UITypes.LinkToAnotherRecord,
+      ] as string[]
+    ).includes(col.uidt)
+  );
+}
+
+export function isLinksOrLTAR(
+  colOrUidt: ColumnType | { uidt: UITypes | string } | UITypes | string
+) {
+  return [UITypes.LinkToAnotherRecord, UITypes.Links].includes(
+    <UITypes>(typeof colOrUidt === 'object' ? colOrUidt?.uidt : colOrUidt)
+  );
+}
+
+export const getEquivalentUIType = ({
+  formulaColumn,
+}: {
+  formulaColumn: ColumnType;
+}): void | UITypes => {
+  switch ((formulaColumn?.colOptions as any)?.parsed_tree?.dataType) {
+    case FormulaDataTypes.NUMERIC:
+      return UITypes.Number;
+    case FormulaDataTypes.DATE:
+      return UITypes.DateTime;
+    case FormulaDataTypes.LOGICAL:
+    case FormulaDataTypes.BOOLEAN:
+      return UITypes.Checkbox;
+  }
+};
+
+export const isSelectTypeCol = (
+  colOrUidt: ColumnType | { uidt: UITypes | string } | UITypes | string
+) => {
+  return [UITypes.SingleSelect, UITypes.MultiSelect, UITypes.User].includes(
+    <UITypes>(typeof colOrUidt === 'object' ? colOrUidt?.uidt : colOrUidt)
+  );
+};
 export default UITypes;

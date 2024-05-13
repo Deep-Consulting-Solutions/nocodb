@@ -26,14 +26,26 @@ vModel.value.meta = {
 <template>
   <a-row>
     <a-col :span="24">
-      <span class="prose-sm mt-2">A duration of time in minutes or seconds (e.g. 1:23).</span>
+      <span class="prose-sm mt-2">{{ $t('labels.durationInfo') }}</span>
     </a-col>
 
     <a-col :span="24">
-      <a-form-item label="Duration Format">
+      <a-form-item :label="$t('labels.durationFormat')">
         <a-select v-model:value="vModel.meta.duration" class="w-52" dropdown-class-name="nc-dropdown-duration-option">
           <a-select-option v-for="(duration, i) of durationOptionList" :key="i" :value="duration.id">
-            {{ duration.title }}
+            <div class="flex gap-2 w-full truncate items-center">
+              <NcTooltip show-on-truncate-only class="flex-1 truncate">
+                <template #title> {{ duration.title }}</template>
+                {{ duration.title }}
+              </NcTooltip>
+
+              <component
+                :is="iconMap.check"
+                v-if="vModel.meta.duration === duration.id"
+                id="nc-selected-item-icon"
+                class="text-primary w-4 h-4"
+              />
+            </div>
           </a-select-option>
         </a-select>
       </a-form-item>

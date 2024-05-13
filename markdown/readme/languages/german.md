@@ -190,7 +190,7 @@ docker-compose up -d
 
 ## Umgebungsvariablen
 
-Siehe [Environment variables](https://docs.nocodb.com/getting-started/environment-variables)
+Siehe [Environment variables](https://docs.nocodb.com/getting-started/self-hosted/environment-variables)
 
 # Entwicklungsaufbau
 
@@ -205,8 +205,8 @@ cd nocodb
 
 ```shell
 cd packages/nocodb
-npm install
-npm run watch:run
+pnpm install
+pnpm run watch:run
 # localhost:8080/dashboard im Browser aufrufen
 ```
 
@@ -214,8 +214,8 @@ npm run watch:run
 
 ```shell
 cd packages/nc-gui
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 # localhost:3000/dashboard iM Browser aufrufen
 ```
 

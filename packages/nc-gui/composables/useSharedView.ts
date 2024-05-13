@@ -1,4 +1,5 @@
 import type {
+  CalendarType,
   ExportTypes,
   FilterType,
   KanbanType,
@@ -15,11 +16,17 @@ import { computed, parseProp, storeToRefs, useGlobal, useMetas, useNuxtApp, useS
 export function useSharedView() {
   const nestedFilters = ref<(FilterType & { status?: 'update' | 'delete' | 'create'; parentId?: string })[]>([])
 
-  const { appInfo } = $(useGlobal())
+  const { appInfo } = useGlobal()
 
-  const { project } = storeToRefs(useProject())
+  const baseStore = useBase()
 
-  const appInfoDefaultLimit = appInfo.defaultLimit || 25
+  const basesStore = useBases()
+
+  const { basesUser } = storeToRefs(basesStore)
+
+  const { base } = storeToRefs(baseStore)
+
+  const appInfoDefaultLimit = appInfo.value.defaultLimit || 25
 
   const paginationData = useState<PaginatedType>('paginationData', () => ({
     page: 1,
@@ -32,9 +39,11 @@ export function useSharedView() {
 
   const password = useState<string | undefined>('password', () => undefined)
 
+  provide(SharedViewPasswordInj, password)
+
   const allowCSVDownload = useState<boolean>('allowCSVDownload', () => false)
 
-  const meta = useState<TableType | KanbanType | MapType | undefined>('meta', () => undefined)
+  const meta = useState<TableType | KanbanType | MapType | CalendarType | undefined>('meta', () => undefined)
 
   const formColumns = computed(
     () =>
@@ -81,19 +90,24 @@ export function useSharedView() {
 
     await setMeta(viewMeta.model)
 
-    // if project is not defined then set it with an object containing base
-    if (!project.value?.bases)
-      project.value = {
-        bases: [
+    // if base is not defined then set it with an object containing source
+    if (!base.value?.sources)
+      baseStore.setProject({
+        id: viewMeta.base_id,
+        sources: [
           {
-            id: viewMeta.base_id,
+            id: viewMeta.source_id,
             type: viewMeta.client,
           },
         ],
-      }
+      })
 
     const relatedMetas = { ...viewMeta.relatedMetas }
     Object.keys(relatedMetas).forEach((key) => setMeta(relatedMetas[key]))
+
+    if (viewMeta.users) {
+      basesUser.value.set(viewMeta.base_id, viewMeta.users)
+    }
   }
 
   const fetchSharedViewData = async (param: {
@@ -122,6 +136,75 @@ export function useSharedView() {
       sharedView.value.uuid!,
       {
         limit: sharedView.value?.type === ViewTypes.MAP ? 1000 : undefined,
+        ...param,
+        filterArrJson: JSON.stringify(param.filtersArr ?? nestedFilters.value),
+        sortArrJson: JSON.stringify(param.sortsArr ?? sorts.value),
+      } as any,
+      {
+        headers: {
+          'xc-password': password.value,
+        },
+      },
+    )
+  }
+
+  const fetchSharedCalendarViewData = async (param: {
+    from_date: string
+    to_date: string
+    sortsArr: SortType[]
+    filtersArr: FilterType[]
+    fields?: any[]
+    sort?: any[]
+    where?: string
+    /** Query params for nested data */
+    nested?: any
+    offset?: number
+  }) => {
+    if (!sharedView.value)
+      return {
+        list: [],
+        pageInfo: {},
+      }
+
+    if (!param.offset) {
+      const page = paginationData.value.page || 1
+      const pageSize = paginationData.value.pageSize || appInfoDefaultLimit
+      param.offset = (page - 1) * pageSize
+    }
+
+    return await $api.dbCalendarViewRow.publicDataCalendarRowList(
+      sharedView.value.uuid!,
+      {
+        limit: sharedView.value?.type === ViewTypes.CALENDAR ? 3000 : undefined,
+        ...param,
+        filterArrJson: JSON.stringify(param.filtersArr ?? nestedFilters.value),
+        sortArrJson: JSON.stringify(param.sortsArr ?? sorts.value),
+      } as any,
+      {
+        headers: {
+          'xc-password': password.value,
+        },
+      },
+    )
+  }
+
+  const fetchSharedViewActiveDate = async (param: {
+    from_date: string
+    to_date: string
+    sortsArr: SortType[]
+    filtersArr: FilterType[]
+    sort?: any[]
+    where?: string
+  }) => {
+    if (!sharedView.value)
+      return {
+        list: [],
+        pageInfo: {},
+      }
+
+    return await $api.public.dataCalendarRowCount(
+      sharedView.value.uuid!,
+      {
         ...param,
         filterArrJson: JSON.stringify(param.filtersArr ?? nestedFilters.value),
         sortArrJson: JSON.stringify(param.sortsArr ?? sorts.value),
@@ -186,6 +269,8 @@ export function useSharedView() {
     meta,
     nestedFilters,
     fetchSharedViewData,
+    fetchSharedViewActiveDate,
+    fetchSharedCalendarViewData,
     fetchSharedViewGroupedData,
     paginationData,
     sorts,
