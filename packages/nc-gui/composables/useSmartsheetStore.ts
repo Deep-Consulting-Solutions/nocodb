@@ -1,22 +1,13 @@
 import { ViewTypes } from 'nocodb-sdk'
 import type { FilterType, KanbanType, SortType, TableType, ViewType } from 'nocodb-sdk'
 import type { Ref } from 'vue'
-import {
-  computed,
-  ref,
-  storeToRefs,
-  unref,
-  useEventBus,
-  useFieldQuery,
-  useInjectionState,
-  useNuxtApp,
-  useProject,
-} from '#imports'
-import type { SmartsheetStoreEvents } from '~/lib'
+import { computed, ref, storeToRefs, unref, useBase, useEventBus, useFieldQuery, useInjectionState, useNuxtApp } from '#imports'
+import type { SmartsheetStoreEvents } from '#imports'
 
 const [useProvideSmartsheetStore, useSmartsheetStore] = useInjectionState(
   (
-    view: Ref<ViewType | undefined>,
+    // _view is deprecated, we use viewsStore instead
+    _view: Ref<ViewType | undefined>,
     meta: Ref<TableType | KanbanType | undefined>,
     shared = false,
     initialSorts?: Ref<SortType[]>,
@@ -24,12 +15,14 @@ const [useProvideSmartsheetStore, useSmartsheetStore] = useInjectionState(
   ) => {
     const { $api } = useNuxtApp()
 
-    const projectStore = useProject()
+    const { activeView: view, activeNestedFilters, activeSorts } = storeToRefs(useViewsStore())
 
-    const { sqlUis } = storeToRefs(projectStore)
+    const baseStore = useBase()
 
-    const sqlUi = ref(
-      (meta.value as TableType)?.base_id ? sqlUis.value[(meta.value as TableType).base_id!] : Object.values(sqlUis.value)[0],
+    const { sqlUis } = storeToRefs(baseStore)
+
+    const sqlUi = computed(() =>
+      (meta.value as TableType)?.source_id ? sqlUis.value[(meta.value as TableType).source_id!] : Object.values(sqlUis.value)[0],
     )
 
     const { search } = useFieldQuery()
@@ -41,9 +34,11 @@ const [useProvideSmartsheetStore, useSmartsheetStore] = useInjectionState(
     const isGrid = computed(() => view.value?.type === ViewTypes.GRID)
     const isForm = computed(() => view.value?.type === ViewTypes.FORM)
     const isGallery = computed(() => view.value?.type === ViewTypes.GALLERY)
+    const isCalendar = computed(() => view.value?.type === ViewTypes.CALENDAR)
     const isKanban = computed(() => view.value?.type === ViewTypes.KANBAN)
     const isMap = computed(() => view.value?.type === ViewTypes.MAP)
     const isSharedForm = computed(() => isForm.value && shared)
+    const isDefaultView = computed(() => view.value?.is_default)
     const xWhere = computed(() => {
       let where
       const col =
@@ -64,6 +59,28 @@ const [useProvideSmartsheetStore, useSmartsheetStore] = useInjectionState(
     const sorts = ref<SortType[]>(unref(initialSorts) ?? [])
     const nestedFilters = ref<FilterType[]>(unref(initialFilters) ?? [])
 
+    const allFilters = ref<Filter[]>([])
+
+    watch(
+      sorts,
+      () => {
+        activeSorts.value = sorts.value
+      },
+      {
+        immediate: true,
+      },
+    )
+
+    watch(
+      nestedFilters,
+      () => {
+        activeNestedFilters.value = nestedFilters.value
+      },
+      {
+        immediate: true,
+      },
+    )
+
     return {
       view,
       meta,
@@ -76,11 +93,15 @@ const [useProvideSmartsheetStore, useSmartsheetStore] = useInjectionState(
       isGallery,
       isKanban,
       isMap,
+      isCalendar,
       isSharedForm,
       sorts,
       nestedFilters,
       isSqlView,
       eventBus,
+      sqlUi,
+      allFilters,
+      isDefaultView,
     }
   },
   'smartsheet-store',

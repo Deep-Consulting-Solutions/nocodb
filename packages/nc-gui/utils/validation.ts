@@ -1,4 +1,4 @@
-import { getI18n } from '~/plugins/a.i18n'
+import { getI18n } from '../plugins/a.i18n'
 
 export const validateEmail = (v: string) =>
   /^(([^<>()[\].,;:\s@"]+(\.[^<>()[\].,;:\s@"]+)*)|(".+"))@(([^<>()[\].,;:\s@"]+\.)+[^<>()[\].,;:\s@"]{2,})$/i.test(v)
@@ -11,6 +11,10 @@ export const validateTableName = {
       if (!value) {
         // return 'Table name required'
         return reject(new Error(t('msg.error.tableNameRequired')))
+      }
+
+      if (value.length > 52) {
+        return reject(new Error(t('msg.error.columnNameExceedsCharacters', { value: 52 })))
       }
 
       // exclude . / \
@@ -53,7 +57,25 @@ export const validateColumnName = {
   },
 }
 
-export const projectTitleValidator = {
+export const layoutTitleValidator = {
+  validator: (rule: any, value: any) => {
+    const { t } = getI18n().global
+
+    return new Promise((resolve, reject) => {
+      if (value?.length > 250) {
+        reject(new Error(t('msg.error.layoutNameExceeds50Characters')))
+      }
+
+      if (value[0] === ' ') {
+        reject(new Error(t('msg.error.layoutNameCannotStartWithSpace')))
+      }
+
+      resolve(true)
+    })
+  },
+}
+
+export const baseTitleValidator = {
   validator: (rule: any, value: any) => {
     const { t } = getI18n().global
 
@@ -80,21 +102,17 @@ export const fieldRequiredValidator = () => {
   }
 }
 
-export const fieldLengthValidator = (sqlClientType: string) => {
+export const fieldLengthValidator = () => {
   return {
     validator: (rule: any, value: any) => {
       const { t } = getI18n().global
 
-      // no limit for sqlite but set as 255
-      let fieldLengthLimit = 255
-
-      if (sqlClientType === 'mysql2' || sqlClientType === 'mysql') {
-        fieldLengthLimit = 64
-      } else if (sqlClientType === 'pg') {
-        fieldLengthLimit = 59
-      } else if (sqlClientType === 'mssql') {
-        fieldLengthLimit = 128
-      }
+      /// mysql allows 64 characters for column_name
+      // postgres allows 59 characters for column_name
+      // mssql allows 128 characters for column_name
+      // sqlite allows any number of characters for column_name
+      // We allow 255 for all databases, truncate will be handled by backend for column_name
+      const fieldLengthLimit = 255
 
       return new Promise((resolve, reject) => {
         if (value?.length > fieldLengthLimit) {
@@ -187,6 +205,16 @@ export const emailValidator = {
         )
       }
       return resolve(true)
+    })
+  },
+}
+
+export const urlValidator = {
+  validator: (_: unknown, v: string) => {
+    return new Promise((resolve, reject) => {
+      if (!v.length || isValidURL(v)) return resolve()
+
+      reject(new Error(t('msg.error.invalidURL')))
     })
   },
 }

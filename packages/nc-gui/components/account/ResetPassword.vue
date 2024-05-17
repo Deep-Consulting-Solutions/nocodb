@@ -16,19 +16,13 @@ const form = reactive({
 })
 
 const formRules = {
-  currentPassword: [
-    // Current password is required
-    { required: true, message: t('msg.error.signUpRules.passwdRequired') },
-  ],
+  currentPassword: [{ required: true, message: t('msg.error.signUpRules.passwdRequired') }],
   password: [
-    // Password is required
     { required: true, message: t('msg.error.signUpRules.passwdRequired') },
     { min: 8, message: t('msg.error.signUpRules.passwdLength') },
   ],
   passwordRepeat: [
-    // PasswordRepeat is required
     { required: true, message: t('msg.error.signUpRules.passwdRequired') },
-    // Passwords match
     {
       validator: (_: unknown, _v: string) => {
         return new Promise((resolve, reject) => {
@@ -56,7 +50,7 @@ const passwordChange = async () => {
 
   await signOut()
 
-  navigateTo('/signin')
+  await navigateTo('/signin')
 }
 
 const resetError = () => {
@@ -65,27 +59,32 @@ const resetError = () => {
 </script>
 
 <template>
-  <div class="mx-auto relative flex flex-col justify-center gap-2 w-full px-8 md:(bg-white) max-w-[900px]">
-    <div class="text-xl mt-4 mb-8 text-center font-weight-bold">{{ $t('activity.changePwd') }}</div>
+  <div class="mx-auto relative flex flex-col justify-start gap-2 w-full px-8 md:(bg-white) max-w-[900px]">
+    <div class="text-xl my-4 text-left font-weight-bold">{{ $t('activity.changePwd') }}</div>
     <a-form
       ref="formValidator"
       data-testid="nc-user-settings-form"
       layout="vertical"
-      class="change-password lg:max-w-3/4 w-full !mx-auto"
+      class="change-password lg:max-w-3/4 w-full"
       no-style
       :model="form"
       @finish="passwordChange"
     >
       <Transition name="layout">
         <div v-if="error" class="mx-auto mb-4 bg-red-500 text-white rounded-lg w-3/4 p-1">
-          <div data-testid="nc-user-settings-form__error" class="flex items-center gap-2 justify-center">
+          <div data-testid="nc-user-settings-form__error" class="flex items-center gap-2 justify-center" data-rec="true">
             <MaterialSymbolsWarning />
             {{ error }}
           </div>
         </div>
       </Transition>
 
-      <a-form-item :label="$t('placeholder.password.current')" name="currentPassword" :rules="formRules.currentPassword">
+      <a-form-item
+        :label="$t('placeholder.password.current')"
+        data-rec="true"
+        name="currentPassword"
+        :rules="formRules.currentPassword"
+      >
         <a-input-password
           v-model:value="form.currentPassword"
           data-testid="nc-user-settings-form__current-password"
@@ -96,7 +95,7 @@ const resetError = () => {
         />
       </a-form-item>
 
-      <a-form-item :label="$t('placeholder.password.new')" name="password" :rules="formRules.password">
+      <a-form-item :label="$t('placeholder.password.new')" data-rec="true" name="password" :rules="formRules.password">
         <a-input-password
           v-model:value="form.password"
           data-testid="nc-user-settings-form__new-password"
@@ -107,7 +106,12 @@ const resetError = () => {
         />
       </a-form-item>
 
-      <a-form-item :label="$t('placeholder.password.confirm')" name="passwordRepeat" :rules="formRules.passwordRepeat">
+      <a-form-item
+        :label="$t('placeholder.password.confirm')"
+        data-rec="true"
+        name="passwordRepeat"
+        :rules="formRules.passwordRepeat"
+      >
         <a-input-password
           v-model:value="form.passwordRepeat"
           data-testid="nc-user-settings-form__new-password-repeat"
@@ -118,13 +122,19 @@ const resetError = () => {
         />
       </a-form-item>
 
-      <div class="text-center">
-        <button data-testid="nc-user-settings-form__submit" class="scaling-btn bg-opacity-100" type="submit">
-          <span class="flex items-center gap-2">
+      <div class="text-right">
+        <a-button
+          size="middle"
+          data-testid="nc-user-settings-form__submit"
+          class="!rounded-md !h-[2.5rem]"
+          type="primary"
+          html-type="submit"
+        >
+          <div class="flex justify-center items-center gap-2" data-rec="true">
             <component :is="iconMap.passwordChange" />
             {{ $t('activity.changePwd') }}
-          </span>
-        </button>
+          </div>
+        </a-button>
       </div>
     </a-form>
   </div>

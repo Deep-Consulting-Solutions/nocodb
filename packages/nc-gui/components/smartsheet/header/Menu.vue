@@ -1,32 +1,34 @@
 <script lang="ts" setup>
-import type { ColumnReqType, LinkToAnotherRecordType } from 'nocodb-sdk'
-import { RelationTypes, UITypes } from 'nocodb-sdk'
+import type { ColumnReqType } from 'nocodb-sdk'
+import { PlanLimitTypes, RelationTypes, UITypes, isLinksOrLTAR } from 'nocodb-sdk'
+import { computed } from 'vue'
 import {
   ActiveViewInj,
   ColumnInj,
   IsLockedInj,
   MetaInj,
-  Modal,
   ReloadViewDataHookInj,
   SmartsheetStoreEvents,
-  extractSdkResponseErrorMsg,
-  getUniqueColumnName,
   iconMap,
   inject,
   message,
+  toRef,
   useI18n,
   useMetas,
   useNuxtApp,
   useSmartsheetStoreOrThrow,
   useUndoRedo,
 } from '#imports'
-import type { UndoRedoAction } from '~~/lib'
 
-const { virtual = false } = defineProps<{ virtual?: boolean }>()
+const props = defineProps<{ virtual?: boolean; isOpen: boolean }>()
 
-const emit = defineEmits(['edit', 'addColumn'])
+const emit = defineEmits(['edit', 'addColumn', 'update:isOpen'])
 
-const { eventBus } = useSmartsheetStoreOrThrow()
+const virtual = toRef(props, 'virtual')
+
+const isOpen = useVModel(props, 'isOpen', emit)
+
+const { eventBus, allFilters } = useSmartsheetStoreOrThrow()
 
 const column = inject(ColumnInj)
 
@@ -38,6 +40,10 @@ const view = inject(ActiveViewInj, ref())
 
 const isLocked = inject(IsLockedInj)
 
+const isPublic = inject(IsPublicInj, ref(false))
+
+const { insertSort } = useViewSorts(view, () => reloadDataHook?.trigger())
+
 const { $api, $e } = useNuxtApp()
 
 const { t } = useI18n()
@@ -46,34 +52,17 @@ const { getMeta } = useMetas()
 
 const { addUndo, defineModelScope, defineViewScope } = useUndoRedo()
 
-const deleteColumn = () =>
-  Modal.confirm({
-    title: h('div', ['Do you want to delete ', h('span', { class: 'font-weight-bold' }, [column?.value?.title]), ' column ?']),
-    wrapClassName: 'nc-modal-column-delete',
-    okText: t('general.delete'),
-    okType: 'danger',
-    cancelText: t('general.cancel'),
-    async onOk() {
-      try {
-        await $api.dbTableColumn.delete(column?.value?.id as string)
+const showDeleteColumnModal = ref(false)
 
-        await getMeta(meta?.value?.id as string, true)
+const { gridViewCols } = useViewColumnsOrThrow()
 
-        /** force-reload related table meta if deleted column is a LTAR and not linked to same table */
-        if (column?.value?.uidt === UITypes.LinkToAnotherRecord && column.value?.colOptions) {
-          await getMeta((column.value?.colOptions as LinkToAnotherRecordType).fk_related_model_id!, true)
-        }
-
-        $e('a:column:delete')
-      } catch (e: any) {
-        message.error(await extractSdkResponseErrorMsg(e))
-      }
-    },
-  })
+const { fieldsToGroupBy, groupByLimit } = useViewGroupByOrThrow(view)
 
 const setAsDisplayValue = async () => {
   try {
     const currentDisplayValue = meta?.value?.columns?.find((f) => f.pv)
+
+    isOpen.value = false
 
     await $api.dbTableColumn.primaryColumnSet(column?.value?.id as string)
 
@@ -82,7 +71,7 @@ const setAsDisplayValue = async () => {
     eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
 
     // Successfully updated as primary column
-    message.success(t('msg.success.primaryColumnUpdated'))
+    // message.success(t('msg.success.primaryColumnUpdated'))
 
     $e('a:column:set-primary')
 
@@ -96,7 +85,7 @@ const setAsDisplayValue = async () => {
           eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
 
           // Successfully updated as primary column
-          message.success(t('msg.success.primaryColumnUpdated'))
+          // message.success(t('msg.success.primaryColumnUpdated'))
         },
         args: [column?.value?.id as string],
       },
@@ -109,7 +98,7 @@ const setAsDisplayValue = async () => {
           eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
 
           // Successfully updated as primary column
-          message.success(t('msg.success.primaryColumnUpdated'))
+          // message.success(t('msg.success.primaryColumnUpdated'))
         },
         args: [currentDisplayValue?.id],
       },
@@ -121,87 +110,32 @@ const setAsDisplayValue = async () => {
 }
 
 const sortByColumn = async (direction: 'asc' | 'desc') => {
-  try {
-    $e('a:sort:add', { from: 'column-menu' })
-    const data: any = await $api.dbTableSort.create(view.value?.id as string, {
-      fk_column_id: column!.value.id,
-      direction,
-      push_to_top: true,
-    })
-
-    addUndo({
-      redo: {
-        fn: async function redo(this: UndoRedoAction) {
-          const data: any = await $api.dbTableSort.create(view.value?.id as string, {
-            fk_column_id: column!.value.id,
-            direction,
-            push_to_top: true,
-          })
-          this.undo.args = [data.id]
-          eventBus.emit(SmartsheetStoreEvents.SORT_RELOAD)
-          reloadDataHook?.trigger()
-        },
-        args: [],
-      },
-      undo: {
-        fn: async function undo(id: string) {
-          await $api.dbTableSort.delete(id)
-          eventBus.emit(SmartsheetStoreEvents.SORT_RELOAD)
-          reloadDataHook?.trigger()
-        },
-        args: [data.id],
-      },
-      scope: defineViewScope({ view: view.value }),
-    })
-
-    eventBus.emit(SmartsheetStoreEvents.SORT_RELOAD)
-    reloadDataHook?.trigger()
-  } catch (e: any) {
-    message.error(await extractSdkResponseErrorMsg(e))
-  }
+  await insertSort({
+    column: column!.value,
+    direction,
+    reloadDataHook,
+  })
 }
 
-const duplicateColumn = async () => {
+const isDuplicateDlgOpen = ref(false)
+const selectedColumnExtra = ref<any>()
+const duplicateDialogRef = ref<any>()
+
+const duplicateVirtualColumn = async () => {
   let columnCreatePayload = {}
 
-  // generate duplicate column name
-  const duplicateColumnName = getUniqueColumnName(`${column!.value.title}_copy`, meta!.value!.columns!)
+  // generate duplicate column title
+  const duplicateColumnTitle = getUniqueColumnName(`${column!.value.title} copy`, meta!.value!.columns!)
 
-  // construct column create payload
-  switch (column?.value.uidt) {
-    case UITypes.LinkToAnotherRecord:
-    case UITypes.Lookup:
-    case UITypes.Rollup:
-    case UITypes.Formula:
-      return message.info('Not available at the moment')
-    case UITypes.SingleSelect:
-    case UITypes.MultiSelect:
-      columnCreatePayload = {
-        ...column!.value!,
-        title: duplicateColumnName,
-        column_name: duplicateColumnName,
-        id: undefined,
-        order: undefined,
-        colOptions: {
-          options:
-            column.value.colOptions?.options?.map((option: Record<string, any>) => ({
-              ...option,
-              id: undefined,
-            })) ?? [],
-        },
-      }
-      break
-    default:
-      columnCreatePayload = {
-        ...column!.value!,
-        ...(column!.value.colOptions ?? {}),
-        title: duplicateColumnName,
-        column_name: duplicateColumnName,
-        id: undefined,
-        colOptions: undefined,
-        order: undefined,
-      }
-      break
+  columnCreatePayload = {
+    ...column!.value!,
+    ...(column!.value.colOptions ?? {}),
+    title: duplicateColumnTitle,
+    column_name: duplicateColumnTitle.replace(/\s/g, '_'),
+    id: undefined,
+    colOptions: undefined,
+    order: undefined,
+    system: false,
   }
 
   try {
@@ -218,9 +152,10 @@ const duplicateColumn = async () => {
     await $api.dbTableColumn.create(meta!.value!.id!, {
       ...columnCreatePayload,
       pv: false,
+      view_id: view.value!.id as string,
       column_order: {
         order: newColumnOrder,
-        view_id: view.value?.id as string,
+        view_id: view.value!.id as string,
       },
     } as ColumnReqType)
     await getMeta(meta!.value!.id!, true)
@@ -228,9 +163,57 @@ const duplicateColumn = async () => {
     eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
     reloadDataHook?.trigger()
 
-    message.success(t('msg.success.columnDuplicated'))
+    // message.success(t('msg.success.columnDuplicated'))
   } catch (e) {
     message.error(await extractSdkResponseErrorMsg(e))
+  }
+  // closing dropdown
+  isOpen.value = false
+}
+
+const openDuplicateDlg = async () => {
+  if (!column?.value) return
+  if (
+    column.value.uidt &&
+    [
+      UITypes.Lookup,
+      UITypes.Rollup,
+      UITypes.CreatedTime,
+      UITypes.LastModifiedTime,
+      UITypes.CreatedBy,
+      UITypes.LastModifiedBy,
+    ].includes(column.value.uidt as UITypes)
+  ) {
+    duplicateVirtualColumn()
+  } else {
+    const gridViewColumnList = (await $api.dbViewColumn.list(view.value?.id as string)).list
+
+    const currentColumnIndex = gridViewColumnList.findIndex((f) => f.fk_column_id === column!.value.id)
+    let newColumnOrder
+    if (currentColumnIndex === gridViewColumnList.length - 1) {
+      newColumnOrder = gridViewColumnList[currentColumnIndex].order! + 1
+    } else {
+      newColumnOrder = (gridViewColumnList[currentColumnIndex].order! + gridViewColumnList[currentColumnIndex + 1].order!) / 2
+    }
+
+    selectedColumnExtra.value = {
+      pv: false,
+      view_id: view.value!.id as string,
+      column_order: {
+        order: newColumnOrder,
+        view_id: view.value!.id as string,
+      },
+    }
+
+    if (column.value.uidt === UITypes.Formula) {
+      nextTick(() => {
+        duplicateDialogRef?.value?.duplicate()
+      })
+    } else {
+      isDuplicateDlgOpen.value = true
+    }
+
+    isOpen.value = false
   }
 }
 
@@ -290,98 +273,236 @@ const hideField = async () => {
     scope: defineViewScope({ view: view.value }),
   })
 }
+
+const handleDelete = () => {
+  // closing the dropdown
+  // when modal opens
+  isOpen.value = false
+  showDeleteColumnModal.value = true
+}
+
+const onEditPress = () => {
+  isOpen.value = false
+  emit('edit')
+}
+
+const onInsertBefore = () => {
+  isOpen.value = false
+  addColumn(true)
+}
+const onInsertAfter = () => {
+  isOpen.value = false
+  addColumn()
+}
+
+const isDeleteAllowed = computed(() => {
+  return column?.value && !column.value.system
+})
+const isDuplicateAllowed = computed(() => {
+  return column?.value && !column.value.system
+})
+const isFilterSupported = computed(
+  () =>
+    !!(meta.value?.columns || []).find((f) => f.id === column?.value?.id && ![UITypes.QrCode, UITypes.Barcode].includes(f.uidt)),
+)
+
+const { getPlanLimit } = useWorkspace()
+
+const isFilterLimitExceeded = computed(
+  () =>
+    allFilters.value.filter((f) => !(f.is_group || f.status === 'delete')).length >= getPlanLimit(PlanLimitTypes.FILTER_LIMIT),
+)
+
+const isGroupedByThisField = computed(() => !!gridViewCols.value[column?.value?.id]?.group_by)
+
+const isGroupBySupported = computed(() => !!(fieldsToGroupBy.value || []).find((f) => f.id === column?.value?.id))
+
+const isGroupByLimitExceeded = computed(() => {
+  const groupBy = Object.values(gridViewCols.value).filter((c) => c.group_by)
+  return !(fieldsToGroupBy.value.length && fieldsToGroupBy.value.length > groupBy.length && groupBy.length < groupByLimit)
+})
+
+const filterOrGroupByThisField = (event: SmartsheetStoreEvents) => {
+  if (column?.value) {
+    eventBus.emit(event, column.value)
+  }
+  isOpen.value = false
+}
 </script>
 
 <template>
-  <a-dropdown v-if="!isLocked" placement="bottomRight" :trigger="['click']" overlay-class-name="nc-dropdown-column-operations">
-    <div><GeneralIcon icon="arrowDown" class="text-grey h-full text-grey nc-ui-dt-dropdown cursor-pointer outline-0 mr-2" /></div>
+  <a-dropdown
+    v-if="!isLocked"
+    v-model:visible="isOpen"
+    :trigger="['click']"
+    placement="bottomRight"
+    overlay-class-name="nc-dropdown-column-operations !border-1 rounded-lg !shadow-xl"
+    @click.stop="isOpen = !isOpen"
+  >
+    <div @dblclick.stop>
+      <GeneralIcon icon="arrowDown" class="text-grey h-full text-grey nc-ui-dt-dropdown cursor-pointer outline-0 mr-2" />
+    </div>
     <template #overlay>
-      <a-menu class="shadow bg-white">
-        <a-menu-item @click="emit('edit')">
+      <NcMenu class="flex flex-col gap-1 border-gray-200 nc-column-options">
+        <NcMenuItem @click="onEditPress">
           <div class="nc-column-edit nc-header-menu-item">
-            <component :is="iconMap.edit" class="text-primary" />
+            <component :is="iconMap.ncEdit" class="text-gray-700" />
             <!-- Edit -->
             {{ $t('general.edit') }}
           </div>
-        </a-menu-item>
-        <template v-if="column.uidt !== UITypes.LinkToAnotherRecord || column.colOptions.type !== RelationTypes.BELONGS_TO">
-          <a-divider class="!my-0" />
-          <a-menu-item @click="sortByColumn('asc')">
-            <div v-e="['a:field:sort', { dir: 'asc' }]" class="nc-column-insert-after nc-header-menu-item">
-              <component :is="iconMap.sortAsc" class="text-primary" />
-              <!-- Sort Ascending -->
-              {{ $t('general.sortAsc') }}
-            </div>
-          </a-menu-item>
-          <a-menu-item @click="sortByColumn('desc')">
-            <div v-e="['a:field:sort', { dir: 'desc' }]" class="nc-column-insert-before nc-header-menu-item">
-              <component :is="iconMap.sortDesc" class="text-primary" />
-              <!-- Sort Descending -->
-              {{ $t('general.sortDesc') }}
-            </div>
-          </a-menu-item>
-        </template>
-        <a-divider class="!my-0" />
-        <a-menu-item v-if="!column?.pv" @click="hideField">
+        </NcMenuItem>
+        <a-divider v-if="!column?.pv" class="!my-0" />
+        <NcMenuItem v-if="!column?.pv" @click="hideField">
           <div v-e="['a:field:hide']" class="nc-column-insert-before nc-header-menu-item">
-            <component :is="iconMap.eye" class="text-primary" />
+            <component :is="iconMap.eye" class="text-gray-700 !w-3.75 !h-3.75" />
             <!-- Hide Field -->
             {{ $t('general.hideField') }}
           </div>
-        </a-menu-item>
-
-        <a-divider class="!my-0" />
-
-        <a-menu-item
-          v-if="column.uidt !== UITypes.LinkToAnotherRecord && column.uidt !== UITypes.Lookup && !column.pk"
-          @click="duplicateColumn"
-        >
-          <div v-e="['a:field:duplicate']" class="nc-column-duplicate nc-header-menu-item">
-            <component :is="iconMap.duplicate" class="text-primary" />
-            <!-- Duplicate -->
-            {{ t('general.duplicate') }}
-          </div>
-        </a-menu-item>
-        <a-menu-item @click="addColumn()">
-          <div v-e="['a:field:insert:after']" class="nc-column-insert-after nc-header-menu-item">
-            <component :is="iconMap.colInsertAfter" class="text-primary" />
-            <!-- Insert After -->
-            {{ t('general.insertAfter') }}
-          </div>
-        </a-menu-item>
-        <a-menu-item v-if="!column?.pv" @click="addColumn(true)">
-          <div v-e="['a:field:insert:before']" class="nc-column-insert-before nc-header-menu-item">
-            <component :is="iconMap.colInsertBefore" class="text-primary" />
-            <!-- Insert Before -->
-            {{ t('general.insertBefore') }}
-          </div>
-        </a-menu-item>
-        <a-divider class="!my-0" />
-
-        <a-menu-item v-if="(!virtual || column?.uidt === UITypes.Formula) && !column?.pv" @click="setAsDisplayValue">
-          <div class="nc-column-set-primary nc-header-menu-item">
-            <GeneralIcon icon="star" class="text-primary" />
+        </NcMenuItem>
+        <NcMenuItem v-if="(!virtual || column?.uidt === UITypes.Formula) && !column?.pv" @click="setAsDisplayValue">
+          <div class="nc-column-set-primary nc-header-menu-item item">
+            <GeneralIcon icon="star" class="text-gray-700 !w-4.25 !h-4.25" />
 
             <!--       todo : tooltip -->
             <!-- Set as Display value -->
             {{ $t('activity.setDisplay') }}
           </div>
-        </a-menu-item>
+        </NcMenuItem>
 
-        <a-menu-item v-if="!column?.pv" @click="deleteColumn">
-          <div class="nc-column-delete nc-header-menu-item">
-            <component :is="iconMap.delete" class="text-error" />
+        <a-divider v-if="!isLinksOrLTAR(column) || column.colOptions.type !== RelationTypes.BELONGS_TO" class="!my-0" />
+
+        <template v-if="!isLinksOrLTAR(column) || column.colOptions.type !== RelationTypes.BELONGS_TO">
+          <NcMenuItem @click="sortByColumn('asc')">
+            <div v-e="['a:field:sort', { dir: 'asc' }]" class="nc-column-insert-after nc-header-menu-item">
+              <component
+                :is="iconMap.sortDesc"
+                class="text-gray-700 !rotate-180 !w-4.25 !h-4.25"
+                :style="{
+                  transform: 'rotate(180deg)',
+                }"
+              />
+
+              <!-- Sort Ascending -->
+              {{ $t('general.sortAsc') }}
+            </div>
+          </NcMenuItem>
+          <NcMenuItem @click="sortByColumn('desc')">
+            <div v-e="['a:field:sort', { dir: 'desc' }]" class="nc-column-insert-before nc-header-menu-item">
+              <component :is="iconMap.sortDesc" class="text-gray-700 !w-4.25 !h-4.25 ml-0.5 mr-0.25" />
+              <!-- Sort Descending -->
+              {{ $t('general.sortDesc') }}
+            </div>
+          </NcMenuItem>
+        </template>
+
+        <a-divider class="!my-0" />
+
+        <NcTooltip :disabled="isFilterSupported && !isFilterLimitExceeded">
+          <template #title>
+            {{
+              !isFilterSupported
+                ? "This field type doesn't support filtering"
+                : isFilterLimitExceeded
+                ? 'Filter by limit exceeded'
+                : ''
+            }}
+          </template>
+          <NcMenuItem
+            :disabled="!isFilterSupported || isFilterLimitExceeded"
+            @click="filterOrGroupByThisField(SmartsheetStoreEvents.FILTER_ADD)"
+          >
+            <div v-e="['a:field:add:filter']" class="nc-column-filter nc-header-menu-item">
+              <component :is="iconMap.filter" class="text-gray-700" />
+              <!-- Filter by this field -->
+              Filter by this field
+            </div>
+          </NcMenuItem>
+        </NcTooltip>
+
+        <NcTooltip :disabled="(isGroupBySupported && !isGroupByLimitExceeded) || isGroupedByThisField || !(isEeUI && !isPublic)">
+          <template #title>{{
+            !isGroupBySupported
+              ? "This field type doesn't support grouping"
+              : isGroupByLimitExceeded
+              ? 'Group by limit exceeded'
+              : ''
+          }}</template>
+          <NcMenuItem
+            :disabled="isEeUI && !isPublic && (!isGroupBySupported || isGroupByLimitExceeded) && !isGroupedByThisField"
+            @click="
+              filterOrGroupByThisField(
+                isGroupedByThisField ? SmartsheetStoreEvents.GROUP_BY_REMOVE : SmartsheetStoreEvents.GROUP_BY_ADD,
+              )
+            "
+          >
+            <div v-e="['a:field:add:groupby']" class="nc-column-groupby nc-header-menu-item">
+              <component :is="iconMap.group" class="text-gray-700" />
+              <!-- Group by this field -->
+              {{ isGroupedByThisField ? "Don't group by this field" : 'Group by this field' }}
+            </div>
+          </NcMenuItem>
+        </NcTooltip>
+
+        <a-divider class="!my-0" />
+
+        <NcMenuItem v-if="!column?.pk" :disabled="!isDuplicateAllowed" @click="openDuplicateDlg">
+          <div v-e="['a:field:duplicate']" class="nc-column-duplicate nc-header-menu-item">
+            <component :is="iconMap.duplicate" class="text-gray-700" />
+            <!-- Duplicate -->
+            {{ t('general.duplicate') }}
+          </div>
+        </NcMenuItem>
+        <NcMenuItem @click="onInsertAfter">
+          <div v-e="['a:field:insert:after']" class="nc-column-insert-after nc-header-menu-item">
+            <component :is="iconMap.colInsertAfter" class="text-gray-700 !w-4.5 !h-4.5" />
+            <!-- Insert After -->
+            {{ t('general.insertAfter') }}
+          </div>
+        </NcMenuItem>
+        <NcMenuItem v-if="!column?.pv" @click="onInsertBefore">
+          <div v-e="['a:field:insert:before']" class="nc-column-insert-before nc-header-menu-item">
+            <component :is="iconMap.colInsertBefore" class="text-gray-600 !w-4.5 !h-4.5" />
+            <!-- Insert Before -->
+            {{ t('general.insertBefore') }}
+          </div>
+        </NcMenuItem>
+        <a-divider v-if="!column?.pv" class="!my-0" />
+
+        <NcMenuItem v-if="!column?.pv" :disabled="!isDeleteAllowed" class="!hover:bg-red-50" @click="handleDelete">
+          <div class="nc-column-delete nc-header-menu-item text-red-600">
+            <component :is="iconMap.delete" />
             <!-- Delete -->
             {{ $t('general.delete') }}
           </div>
-        </a-menu-item>
-      </a-menu>
+        </NcMenuItem>
+      </NcMenu>
     </template>
   </a-dropdown>
+  <SmartsheetHeaderDeleteColumnModal v-model:visible="showDeleteColumnModal" />
+  <DlgColumnDuplicate
+    v-if="column"
+    ref="duplicateDialogRef"
+    v-model="isDuplicateDlgOpen"
+    :column="column"
+    :extra="selectedColumnExtra"
+  />
 </template>
 
 <style scoped>
 .nc-header-menu-item {
-  @apply text-xs flex items-center px-1 py-2 gap-1;
+  @apply text-dropdown flex items-center gap-2;
+}
+
+.nc-column-options {
+  .nc-icons {
+    @apply !w-5 !h-5;
+  }
+}
+
+:deep(.ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled)) {
+  @apply !hover:text-black text-gray-700;
+}
+:deep(.ant-dropdown-menu-item.ant-dropdown-menu-item-disabled .nc-icon) {
+  @apply text-current;
 }
 </style>

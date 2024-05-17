@@ -1,4 +1,11 @@
-import type { ColumnType, FilterType, ViewType } from 'nocodb-sdk'
+import {
+  type ColumnType,
+  type FilterType,
+  type LinkToAnotherRecordType,
+  type LookupType,
+  type ViewType,
+  getEquivalentUIType,
+} from 'nocodb-sdk'
 import type { ComputedRef, Ref } from 'vue'
 import type { SelectProps } from 'ant-design-vue'
 import { UITypes, isSystemColumn } from 'nocodb-sdk'
@@ -12,15 +19,14 @@ import {
   message,
   ref,
   storeToRefs,
+  useBase,
   useDebounceFn,
   useMetas,
   useNuxtApp,
-  useProject,
-  useUIPermission,
+  useRoles,
   watch,
 } from '#imports'
-import { TabMetaInj } from '~/context'
-import type { Filter, TabItem, UndoRedoAction } from '~/lib'
+import type { Filter, UndoRedoAction } from '#imports'
 
 export function useViewFilters(
   view: Ref<ViewType | undefined>,
@@ -29,22 +35,25 @@ export function useViewFilters(
   reloadData?: () => void,
   _currentFilters?: Filter[],
   isNestedRoot?: boolean,
+  isWebhook?: boolean,
 ) {
-  let currentFilters = $ref(_currentFilters)
+  const currentFilters = ref(_currentFilters)
+
+  const btLookupTypesMap = ref({})
 
   const reloadHook = inject(ReloadViewDataHookInj)
 
-  const { nestedFilters } = useSmartsheetStoreOrThrow()
+  const { nestedFilters, allFilters } = useSmartsheetStoreOrThrow()
 
-  const { projectMeta } = storeToRefs(useProject())
+  const { baseMeta } = storeToRefs(useBase())
 
   const isPublic = inject(IsPublicInj, ref(false))
 
   const { $api, $e } = useNuxtApp()
 
-  const { isUIAllowed } = useUIPermission()
+  const { isUIAllowed } = useRoles()
 
-  const { metas } = useMetas()
+  const { metas, getMeta } = useMetas()
 
   const { addUndo, clone, defineViewScope } = useUndoRedo()
 
@@ -52,18 +61,15 @@ export function useViewFilters(
 
   const nestedMode = computed(() => isPublic.value || !isUIAllowed('filterSync') || !isUIAllowed('filterChildrenRead'))
 
-  const tabMeta = inject(TabMetaInj, ref({ filterState: new Map(), sortsState: new Map() } as TabItem))
-
   const filters = computed<Filter[]>({
     get: () => {
-      return nestedMode.value ? currentFilters! : _filters.value
+      return nestedMode.value ? currentFilters.value! : _filters.value
     },
     set: (value: Filter[]) => {
       if (nestedMode.value) {
-        currentFilters = value
+        currentFilters.value = value
         if (isNestedRoot) {
           nestedFilters.value = value
-          tabMeta.value.filterState!.set(view.value!.id!, nestedFilters.value)
         }
         nestedFilters.value = [...nestedFilters.value]
         reloadHook?.trigger()
@@ -82,7 +88,7 @@ export function useViewFilters(
 
   const activeView = inject(ActiveViewInj, ref())
 
-  const { showSystemFields, metaColumnById } = useViewColumns(activeView, meta)
+  const { showSystemFields, metaColumnById } = useViewColumnsOrThrow()
 
   const options = computed<SelectProps['options']>(() =>
     meta.value?.columns?.filter((c: ColumnType) => {
@@ -104,7 +110,19 @@ export function useViewFilters(
     }
 
     return meta.value?.columns?.reduce((obj: any, col: any) => {
-      obj[col.id] = col.uidt
+      if (col.uidt === UITypes.Formula) {
+        const formulaUIType = getEquivalentUIType({
+          formulaColumn: col,
+        })
+
+        obj[col.id] = formulaUIType || col.uidt
+      }
+      // if column is a lookup column, then use the lookup type extracted from the column
+      else if (btLookupTypesMap.value[col.id]) {
+        obj[col.id] = btLookupTypesMap.value[col.id].uidt
+      } else {
+        obj[col.id] = col.uidt
+      }
       return obj
     }, {})
   })
@@ -133,27 +151,29 @@ export function useViewFilters(
     },
   ) => {
     const isNullOrEmptyOp = ['empty', 'notempty', 'null', 'notnull'].includes(compOp.value)
+    const uidt = types.value[filter.fk_column_id]
+
     if (compOp.includedTypes) {
       // include allowed values only if selected column type matches
-      if (filter.fk_column_id && compOp.includedTypes.includes(types.value[filter.fk_column_id])) {
+      if (filter.fk_column_id && compOp.includedTypes.includes(uidt)) {
         // for 'empty', 'notempty', 'null', 'notnull',
-        // show them based on `showNullAndEmptyInFilter` in Project Settings
-        return isNullOrEmptyOp ? projectMeta.value.showNullAndEmptyInFilter : true
+        // show them based on `showNullAndEmptyInFilter` in Base Settings
+        return isNullOrEmptyOp ? baseMeta.value.showNullAndEmptyInFilter : true
       } else {
         return false
       }
     } else if (compOp.excludedTypes) {
       // include not allowed values only if selected column type not matches
-      if (filter.fk_column_id && !compOp.excludedTypes.includes(types.value[filter.fk_column_id])) {
+      if (filter.fk_column_id && !compOp.excludedTypes.includes(uidt)) {
         // for 'empty', 'notempty', 'null', 'notnull',
-        // show them based on `showNullAndEmptyInFilter` in Project Settings
-        return isNullOrEmptyOp ? projectMeta.value.showNullAndEmptyInFilter : true
+        // show them based on `showNullAndEmptyInFilter` in Base Settings
+        return isNullOrEmptyOp ? baseMeta.value.showNullAndEmptyInFilter : true
       } else {
         return false
       }
     }
     // explicitly include for non-null / non-empty ops
-    return isNullOrEmptyOp ? projectMeta.value.showNullAndEmptyInFilter : true
+    return isNullOrEmptyOp ? baseMeta.value.showNullAndEmptyInFilter : true
   }
 
   const isComparisonSubOpAllowed = (
@@ -166,45 +186,82 @@ export function useViewFilters(
       excludedTypes?: UITypes[]
     },
   ) => {
+    const uidt = types.value[filter.fk_column_id]
+
     if (compOp.includedTypes) {
       // include allowed values only if selected column type matches
-      return filter.fk_column_id && compOp.includedTypes.includes(types.value[filter.fk_column_id])
+      return filter.fk_column_id && compOp.includedTypes.includes(uidt)
     } else if (compOp.excludedTypes) {
       // include not allowed values only if selected column type not matches
-      return filter.fk_column_id && !compOp.excludedTypes.includes(types.value[filter.fk_column_id])
+      return filter.fk_column_id && !compOp.excludedTypes.includes(uidt)
     }
   }
 
   const placeholderFilter = (): Filter => {
+    const logicalOps = new Set(filters.value.slice(1).map((filter) => filter.logical_op))
+
     return {
       comparison_op: comparisonOpList(options.value?.[0].uidt as UITypes).filter((compOp) =>
         isComparisonOpAllowed({ fk_column_id: options.value?.[0].id }, compOp),
       )?.[0].value as FilterType['comparison_op'],
       value: '',
       status: 'create',
-      logical_op: 'and',
+      logical_op: logicalOps.size === 1 ? logicalOps.values().next().value :'and' ,
     }
   }
 
-  const loadFilters = async (hookId?: string) => {
+  const loadAllChildFilters = async (filters: Filter[]) => {
+    // Array to store promises of child filter loading
+    const promises = []
+
+    // Array to store all child filters
+    const allChildFilters: Filter[] = []
+
+    // Iterate over all filters
+    for (const filter of filters) {
+      // Check if the filter is a group
+      if (filter.id && filter.is_group) {
+        // Load children filters from the backend
+        const childFilterPromise = $api.dbTableFilter.childrenRead(filter.id).then((response) => {
+          const childFilters = response.list as Filter[]
+          allChildFilters.push(...childFilters)
+          return loadAllChildFilters(childFilters)
+        })
+        promises.push(childFilterPromise)
+      }
+    }
+
+    // Wait for all promises to resolve
+    await Promise.all(promises)
+
+    // Push all child filters into the allFilters array
+    allFilters.value.push(...allChildFilters)
+  }
+
+  const loadFilters = async (hookId?: string, isWebhook = false, loadAllFilters = false) => {
+    if (!view.value?.id) return
+
     if (nestedMode.value) {
       // ignore restoring if not root filter group
-      if (isNestedRoot) filters.value = tabMeta.value.filterState!.get(view.value!.id!) || []
       return
     }
 
     try {
-      if (hookId) {
+      if (isWebhook || hookId) {
         if (parentId) {
           filters.value = (await $api.dbTableFilter.childrenRead(parentId)).list as Filter[]
-        } else {
-          filters.value = (await $api.dbTableWebhookFilter.read(hookId!)).list as Filter[]
+        } else if (hookId) {
+          filters.value = (await $api.dbTableWebhookFilter.read(hookId)).list as Filter[]
         }
       } else {
         if (parentId) {
           filters.value = (await $api.dbTableFilter.childrenRead(parentId)).list as Filter[]
         } else {
           filters.value = (await $api.dbTableFilter.read(view.value!.id!)).list as Filter[]
+          if (loadAllFilters) {
+            allFilters.value = [...filters.value]
+            await loadAllChildFilters(allFilters.value)
+          }
         }
       }
     } catch (e: any) {
@@ -218,6 +275,11 @@ export function useViewFilters(
       for (const [i, filter] of Object.entries(filters.value)) {
         if (filter.status === 'delete') {
           await $api.dbTableFilter.delete(filter.id as string)
+          if (filter.is_group) {
+            deleteFilterGroupFromAllFilters(filter)
+          } else {
+            allFilters.value = allFilters.value.filter((f) => f.id !== filter.id)
+          }
         } else if (filter.status === 'update') {
           await $api.dbTableFilter.update(filter.id as string, {
             ...filter,
@@ -235,17 +297,19 @@ export function useViewFilters(
               fk_parent_id: parentId,
             })
           }
+
+          allFilters.value.push(filters.value[+i])
         }
       }
 
-      reloadData?.()
+      if (!isWebhook) reloadData?.()
     } catch (e: any) {
       console.log(e)
       message.error(await extractSdkResponseErrorMsg(e))
     }
   }
 
-  const saveOrUpdate = async (filter: Filter, i: number, force = false, undo = false) => {
+  const saveOrUpdate = async (filter: Filter, i: number, force = false, undo = false, skipDataReload = false) => {
     if (!view.value) return
 
     if (!undo) {
@@ -300,6 +364,8 @@ export function useViewFilters(
           ...filter,
           fk_parent_id: parentId,
         })
+
+        allFilters.value.push(filters.value[+i])
       }
     } catch (e: any) {
       console.log(e)
@@ -308,7 +374,22 @@ export function useViewFilters(
 
     lastFilters.value = clone(filters.value)
 
-    reloadData?.()
+    if (!isWebhook && !skipDataReload) reloadData?.()
+  }
+
+  function deleteFilterGroupFromAllFilters(filter: Filter) {
+    // Find all child filters of the specified parentId
+    const childFilters = allFilters.value.filter((f) => f.fk_parent_id === filter.id)
+
+    // Recursively delete child filter of child filter
+    childFilters.forEach((childFilter) => {
+      if (childFilter.is_group) {
+        deleteFilterGroupFromAllFilters(childFilter)
+      }
+    })
+
+    // Remove the parent object and its children from the array
+    allFilters.value = allFilters.value.filter((f) => f.id !== filter.id && f.fk_parent_id !== filter.id)
   }
 
   const deleteFilter = async (filter: Filter, i: number, undo = false) => {
@@ -335,7 +416,7 @@ export function useViewFilters(
     if (nestedMode.value) {
       filters.value.splice(i, 1)
       filters.value = [...filters.value]
-      reloadData?.()
+      if (!isWebhook) reloadData?.()
     } else {
       if (filter.id) {
         // if auto-apply disabled mark it as disabled
@@ -346,7 +427,8 @@ export function useViewFilters(
         } else {
           try {
             await $api.dbTableFilter.delete(filter.id)
-            reloadData?.()
+
+            if (!isWebhook) reloadData?.()
             filters.value.splice(i, 1)
           } catch (e: any) {
             console.log(e)
@@ -359,12 +441,18 @@ export function useViewFilters(
       }
       $e('a:filter:delete', { length: nonDeletedFilters.value.length })
     }
+
+    if (filter.is_group) {
+      deleteFilterGroupFromAllFilters(filter)
+    } else {
+      allFilters.value = allFilters.value.filter((f) => f.id !== filter.id)
+    }
   }
 
   const saveOrUpdateDebounced = useDebounceFn(saveOrUpdate, 500)
 
-  const addFilter = async (undo = false) => {
-    filters.value.push(placeholderFilter())
+  const addFilter = async (undo = false, draftFilter: Partial<FilterType> = {}) => {
+    filters.value.push(draftFilter?.fk_column_id ? { ...placeholderFilter(), ...draftFilter } : placeholderFilter())
     if (!undo) {
       addUndo({
         undo: {
@@ -427,6 +515,39 @@ export function useViewFilters(
     },
   )
 
+  // method to extract looked up column meta for all bt lookup columns
+  // it helps to decide the condition operations for the column
+  const loadBtLookupTypes = async () => {
+    const btLookupTypes = {}
+    try {
+      for (const col of meta.value?.columns || []) {
+        if (col.uidt !== UITypes.Lookup) continue
+        let nextCol = col
+        // check all the relation of nested lookup columns is bt or not
+        // include the column only if all only if all relations are bt
+        while (nextCol && nextCol.uidt === UITypes.Lookup) {
+          // extract the relation column meta
+          const lookupRelation = (await getMeta(nextCol.fk_model_id))?.columns?.find(
+            (c) => c.id === (nextCol.colOptions as LookupType).fk_relation_column_id,
+          )
+          const relatedTableMeta = await getMeta((lookupRelation.colOptions as LinkToAnotherRecordType).fk_related_model_id)
+          nextCol = relatedTableMeta?.columns?.find((c) => c.id === (nextCol.colOptions as LookupType).fk_lookup_column_id)
+
+          // if next column is same as root lookup column then break the loop
+          // since it's going to be a circular loop
+          if (nextCol.id === col.id) {
+            break
+          }
+        }
+        btLookupTypes[col.id] = nextCol
+      }
+      btLookupTypesMap.value = btLookupTypes
+    } catch (e) {
+      // ignore error since it is not blocking any functionality of the app
+      console.error(e)
+    }
+  }
+
   return {
     filters,
     nonDeletedFilters,
@@ -439,5 +560,8 @@ export function useViewFilters(
     saveOrUpdateDebounced,
     isComparisonOpAllowed,
     isComparisonSubOpAllowed,
+    loadBtLookupTypes,
+    btLookupTypesMap,
+    types,
   }
 }

@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import NcModal from '../nc/Modal.vue'
 import {
-  Modal as AModal,
   ActiveCellInj,
   EditModeInj,
   IsFormInj,
+  JsonExpandInj,
   ReadonlyInj,
+  RowHeightInj,
   computed,
   inject,
   ref,
@@ -33,31 +35,35 @@ const active = inject(ActiveCellInj, ref(false))
 
 const isForm = inject(IsFormInj, ref(false))
 
-const readonly = inject(ReadonlyInj)
+const readOnly = inject(ReadonlyInj, ref(false))
 
 const vModel = useVModel(props, 'modelValue', emits)
 
 const localValueState = ref<string | undefined>()
 
-let error = $ref<string | undefined>()
+const error = ref<string | undefined>()
 
-let isExpanded = $ref(false)
+const _isExpanded = inject(JsonExpandInj, ref(false))
+
+const isExpanded = ref(false)
+
+const rowHeight = inject(RowHeightInj, ref(undefined))
 
 const localValue = computed<string | Record<string, any> | undefined>({
   get: () => localValueState.value,
   set: (val: undefined | string | Record<string, any>) => {
     localValueState.value = typeof val === 'object' ? JSON.stringify(val, null, 2) : val
     /** if form and not expanded then sync directly */
-    if (isForm.value && !isExpanded) {
+    if (isForm.value && !isExpanded.value) {
       vModel.value = val
     }
   },
 })
 
 const clear = () => {
-  error = undefined
+  error.value = undefined
 
-  isExpanded = false
+  isExpanded.value = false
 
   editEnabled.value = false
 
@@ -66,44 +72,53 @@ const clear = () => {
 
 const formatJson = (json: string) => {
   try {
-    return JSON.stringify(JSON.parse(json), null, 2)
+    return JSON.stringify(JSON.parse(json))
   } catch (e) {
+    console.log(e)
     return json
   }
 }
 
 const onSave = () => {
-  isExpanded = false
+  isExpanded.value = false
 
   editEnabled.value = false
 
-  localValue.value = localValue ? formatJson(localValue.value as string) : localValue
+  vModel.value = localValue ? formatJson(localValue.value as string) : localValue
+}
 
-  vModel.value = localValue.value
+const setLocalValue = (val: any) => {
+  try {
+    localValue.value = typeof val === 'string' ? JSON.stringify(JSON.parse(val), null, 2) : val
+  } catch (e) {
+    localValue.value = val
+  }
 }
 
 watch(
   vModel,
   (val) => {
-    localValue.value = val
+    setLocalValue(val)
   },
   { immediate: true },
 )
 
-watch(localValue, (val) => {
+watch([localValue, editEnabled], () => {
   try {
-    JSON.parse(val as string)
+    JSON.parse(localValue.value as string)
 
-    error = undefined
+    error.value = undefined
   } catch (e: any) {
-    error = e
+    if (localValue.value === undefined) return
+
+    error.value = e
   }
 })
 
 watch(editEnabled, () => {
-  isExpanded = false
+  isExpanded.value = false
 
-  localValue.value = vModel.value
+  setLocalValue(vModel.value)
 })
 
 useSelectedCellKeyupListener(active, (e) => {
@@ -121,44 +136,67 @@ useSelectedCellKeyupListener(active, (e) => {
       break
   }
 })
+
+const inputWrapperRef = ref<HTMLElement | null>(null)
+
+onClickOutside(inputWrapperRef, (e) => {
+  if ((e.target as HTMLElement)?.closest('.nc-json-action')) return
+  editEnabled.value = false
+})
+
+watch(isExpanded, () => {
+  _isExpanded.value = isExpanded.value
+})
 </script>
 
 <template>
-  <component :is="isExpanded ? AModal : 'div'" v-model:visible="isExpanded" :closable="false" centered :footer="null">
-    <div v-if="editEnabled && !readonly" class="flex flex-col w-full" @mousedown.stop @mouseup.stop @click.stop>
-      <div class="flex flex-row justify-between pt-1 pb-2" @mousedown.stop>
+  <component
+    :is="isExpanded ? NcModal : 'div'"
+    v-model:visible="isExpanded"
+    :closable="false"
+    centered
+    :footer="null"
+    :wrap-class-name="isExpanded ? '!z-1051' : null"
+  >
+    <div v-if="editEnabled && !readOnly" class="flex flex-col w-full" @mousedown.stop @mouseup.stop @click.stop>
+      <div class="flex flex-row justify-between pt-1 pb-2 nc-json-action" @mousedown.stop>
         <a-button type="text" size="small" @click="isExpanded = !isExpanded">
           <CilFullscreenExit v-if="isExpanded" class="h-2.5" />
 
           <CilFullscreen v-else class="h-2.5" />
         </a-button>
 
-        <div v-if="!isForm || isExpanded" class="flex flex-row">
-          <a-button type="text" size="small" :onclick="clear"><div class="text-xs">Cancel</div></a-button>
+        <div v-if="!isForm || isExpanded" class="flex flex-row my-1">
+          <a-button type="text" size="small" :onclick="clear"
+            ><div class="text-xs">{{ $t('general.cancel') }}</div></a-button
+          >
 
           <a-button type="primary" size="small" :disabled="!!error || localValue === vModel" @click="onSave">
-            <div class="text-xs">Save</div>
+            <div class="text-xs">{{ $t('general.save') }}</div>
           </a-button>
         </div>
       </div>
 
       <LazyMonacoEditor
+        ref="inputWrapperRef"
         :model-value="localValue || ''"
         class="min-w-full w-80"
         :class="{ 'expanded-editor': isExpanded, 'editor': !isExpanded }"
         :hide-minimap="true"
         :disable-deep-compare="true"
+        :auto-focus="!isForm"
         @update:model-value="localValue = $event"
+        @keydown.enter.stop
       />
 
-      <span v-if="error" class="text-xs w-full py-1 text-red-500">
+      <span v-if="error" class="nc-cell-field text-xs w-full py-1 text-red-500">
         {{ error.toString() }}
       </span>
     </div>
 
-    <span v-else-if="vModel === null && showNull" class="nc-null">NULL</span>
+    <span v-else-if="vModel === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
 
-    <span v-else>{{ vModel }}</span>
+    <LazyCellClampedText v-else :value="vModel" :lines="rowHeight" class="nc-cell-field" />
   </component>
 </template>
 

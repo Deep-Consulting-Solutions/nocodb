@@ -44,7 +44,14 @@ async function addHook() {
       </a-layout-content>
 
       <a-layout-footer class="!bg-white border-t flex">
-        <a-button v-e="['e:hiring']" class="mx-auto mb-4" href="https://angel.co/company/nocodb" target="_blank" size="large">
+        <a-button
+          v-e="['e:hiring']"
+          class="mx-auto mb-4 !rounded-md"
+          href="https://angel.co/company/nocodb"
+          target="_blank"
+          size="large"
+          rel="noopener noreferrer"
+        >
           🚀 {{ $t('labels.weAreHiring') }}! 🚀
         </a-button>
       </a-layout-footer>

@@ -2,7 +2,11 @@
 import type { VNodeRef } from '@vue/runtime-core'
 import {
   ColumnInj,
+  EditColumnInj,
   EditModeInj,
+  IsExpandedFormOpenInj,
+  IsFormInj,
+  ReadonlyInj,
   computed,
   convertDurationToSeconds,
   convertMS2Duration,
@@ -14,18 +18,24 @@ import {
 
 interface Props {
   modelValue: number | string | null | undefined
-  showValidationError: boolean
+  showValidationError?: boolean
 }
 
 const { modelValue, showValidationError = true } = defineProps<Props>()
 
 const emit = defineEmits(['update:modelValue'])
 
+const { t } = useI18n()
+
 const { showNull } = useGlobal()
 
 const column = inject(ColumnInj)
 
 const editEnabled = inject(EditModeInj)
+
+const isEditColumn = inject(EditColumnInj, ref(false))
+
+const readOnly = inject(ReadonlyInj, ref(false))
 
 const showWarningMessage = ref(false)
 
@@ -35,7 +45,9 @@ const isEdited = ref(false)
 
 const durationType = computed(() => parseProp(column?.value?.meta)?.duration || 0)
 
-const durationPlaceholder = computed(() => durationOptions[durationType.value].title)
+const durationPlaceholder = computed(() =>
+  isEditColumn.value ? `(${t('labels.optional')})` : durationOptions[durationType.value].title,
+)
 
 const localState = computed({
   get: () => convertMS2Duration(modelValue, durationType.value),
@@ -73,17 +85,21 @@ const submitDuration = () => {
   isEdited.value = false
 }
 
-const focus: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))!
+
+const isForm = inject(IsFormInj)!
+
+const focus: VNodeRef = (el) =>
+  !isExpandedFormOpen.value && !isEditColumn.value && !isForm.value && (el as HTMLInputElement)?.focus()
 </script>
 
 <template>
   <div class="duration-cell-wrapper">
     <input
-      v-if="editEnabled"
+      v-if="!readOnly && editEnabled"
       :ref="focus"
       v-model="localState"
-      class="w-full !border-none p-0"
-      :class="{ '!px-2': editEnabled }"
+      class="nc-cell-field w-full !border-none !outline-none py-1"
       :placeholder="durationPlaceholder"
       @blur="submitDuration"
       @keypress="checkDurationFormat($event)"
@@ -97,13 +113,12 @@ const focus: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
       @mousedown.stop
     />
 
-    <span v-else-if="modelValue === null && showNull" class="nc-null">NULL</span>
+    <span v-else-if="modelValue === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
 
-    <span v-else> {{ localState }}</span>
+    <span v-else class="nc-cell-field"> {{ localState }}</span>
 
-    <div v-if="showWarningMessage && showValidationError" class="duration-warning">
-      <!-- TODO: i18n -->
-      Please enter a number
+    <div v-if="showWarningMessage && showValidationError" class="nc-cell-field duration-warning">
+      {{ $t('msg.plsEnterANumber') }}
     </div>
   </div>
 </template>

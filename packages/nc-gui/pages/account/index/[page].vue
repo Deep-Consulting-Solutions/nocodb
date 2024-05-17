@@ -3,9 +3,10 @@ const { appInfo } = useGlobal()
 </script>
 
 <template>
-  <AccountUserManagement v-if="$route.params.page === 'users'" />
-  <AccountToken v-else-if="$route.params.page === 'tokens'" />
-  <AccountAppStore v-else-if="$route.params.page === 'apps' && !appInfo.isCloud" />
-  <AccountLicense v-else-if="$route.params.page === 'license'" />
-  <span v-else></span>
+  <div>
+    <AccountToken v-if="$route.params.page === 'tokens'" />
+    <AccountProfile v-else-if="$route.params.page === 'profile'" />
+    <AccountAppStore v-else-if="$route.params.page === 'apps' && !appInfo.isCloud" />
+    <span v-else></span>
+  </div>
 </template>

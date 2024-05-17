@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { UITypes } from 'nocodb-sdk'
 import type { ColumnType } from 'nocodb-sdk'
-import { storeToRefs } from 'pinia'
 import {
+  ActiveCellInj,
   ColumnInj,
-  EditModeInj,
+  IsFormInj,
   ReadonlyInj,
   computed,
   isBoolean,
@@ -17,16 +18,20 @@ import {
   isMultiSelect,
   isPercent,
   isRating,
+  isReadonlyDateTime,
+  isReadonlyUser,
   isSingleSelect,
   isTextArea,
   isTime,
+  isUser,
   isYear,
   provide,
   ref,
+  storeToRefs,
   toRef,
-  useProject,
+  useBase,
 } from '#imports'
-import type { Filter } from '~/lib'
+import type { Filter } from '#imports'
 import SingleSelect from '~/components/cell/SingleSelect.vue'
 import MultiSelect from '~/components/cell/MultiSelect.vue'
 import DatePicker from '~/components/cell/DatePicker.vue'
@@ -40,9 +45,11 @@ import Decimal from '~/components/cell/Decimal.vue'
 import Integer from '~/components/cell/Integer.vue'
 import Float from '~/components/cell/Float.vue'
 import Text from '~/components/cell/Text.vue'
+import User from '~/components/cell/User.vue'
 
 interface Props {
-  column: ColumnType
+  // column could be possibly undefined when the filter is created
+  column?: ColumnType
   filter: Filter
 }
 
@@ -64,7 +71,7 @@ provide(EditModeInj, readonly(editEnabled))
 
 provide(ReadonlyInj, ref(false))
 
-const checkTypeFunctions = {
+const checkTypeFunctions: Record<string, (column: ColumnType, abstractType?: string) => boolean> = {
   isSingleSelect,
   isMultiSelect,
   isDate,
@@ -76,16 +83,20 @@ const checkTypeFunctions = {
   isPercent,
   isCurrency,
   isDecimal,
+  isReadonlyDateTime,
   isInt,
   isFloat,
   isTextArea,
+  isLinks: (col: ColumnType) => col.uidt === UITypes.Links,
+  isUser,
+  isReadonlyUser,
 }
 
 type FilterType = keyof typeof checkTypeFunctions
 
-const { sqlUis } = storeToRefs(useProject())
+const { sqlUis } = storeToRefs(useBase())
 
-const sqlUi = ref(column.value?.base_id ? sqlUis.value[column.value?.base_id] : Object.values(sqlUis.value)[0])
+const sqlUi = ref(column.value?.source_id ? sqlUis.value[column.value?.source_id] : Object.values(sqlUis.value)[0])
 
 const abstractType = computed(() => column.value && sqlUi.value.getAbstractType(column.value))
 
@@ -96,7 +107,7 @@ const checkType = (filterType: FilterType) => {
     return false
   }
 
-  return checkTypeFunction(column.value, abstractType)
+  return checkTypeFunction(column.value, abstractType.value)
 }
 
 const filterInput = computed({
@@ -129,13 +140,14 @@ const renderDateFilterInput = (sub_op: string) => {
   return DatePicker
 }
 
-const componentMap: Partial<Record<FilterType, any>> = $computed(() => {
+const componentMap: Partial<Record<FilterType, any>> = computed(() => {
   return {
     isSingleSelect: renderSingleSelect(props.filter.comparison_op!),
     isMultiSelect: MultiSelect,
     isDate: renderDateFilterInput(props.filter.comparison_sub_op!),
     isYear: YearPicker,
     isDateTime: renderDateFilterInput(props.filter.comparison_sub_op!),
+    isReadonlyDateTime: renderDateFilterInput(props.filter.comparison_sub_op!),
     isTime: TimePicker,
     isRating: Rating,
     isDuration: Duration,
@@ -144,15 +156,18 @@ const componentMap: Partial<Record<FilterType, any>> = $computed(() => {
     isDecimal: Decimal,
     isInt: Integer,
     isFloat: Float,
+    isLinks: Integer,
+    isUser: User,
+    isReadonlyUser: User,
   }
 })
 
-const filterType = $computed(() => {
-  return Object.keys(componentMap).find((key) => checkType(key as FilterType))
+const filterType = computed(() => {
+  return Object.keys(componentMap.value).find((key) => checkType(key as FilterType))
 })
 
-const componentProps = $computed(() => {
-  switch (filterType) {
+const componentProps = computed(() => {
+  switch (filterType.value) {
     case 'isSingleSelect':
     case 'isMultiSelect': {
       return { disableOptionCreation: true }
@@ -160,11 +175,21 @@ const componentProps = $computed(() => {
     case 'isPercent':
     case 'isDecimal':
     case 'isFloat':
+    case 'isLinks':
     case 'isInt': {
       return { class: 'h-32px' }
     }
     case 'isDuration': {
       return { showValidationError: false }
+    }
+    case 'isUser': {
+      return { forceMulti: true }
+    }
+    case 'isReadonlyUser': {
+      if (['anyof', 'nanyof'].includes(props.filter.comparison_op!)) {
+        return { forceMulti: true }
+      }
+      return {}
     }
     default: {
       return {}
@@ -172,16 +197,23 @@ const componentProps = $computed(() => {
   }
 })
 
-const hasExtraPadding = $computed(() => {
+const hasExtraPadding = computed(() => {
   return (
     column.value &&
-    (isInt(column.value, abstractType) ||
+    (column.value?.uidt === UITypes.Links ||
+      isInt(column.value, abstractType) ||
       isDate(column.value, abstractType) ||
       isDateTime(column.value, abstractType) ||
       isTime(column.value, abstractType) ||
       isYear(column.value, abstractType))
   )
 })
+
+const isInputBoxOnFocus = ref(false)
+
+// provide the following to override the default behavior and enable input fields like in form
+provide(ActiveCellInj, ref(true))
+provide(IsFormInj, ref(true))
 </script>
 
 <template>
@@ -193,8 +225,8 @@ const hasExtraPadding = $computed(() => {
   />
   <div
     v-else
-    class="bg-white border-1 flex min-w-120px max-w-170px min-h-32px h-full"
-    :class="{ 'px-2': hasExtraPadding }"
+    class="bg-white border-1 flex flex-grow min-h-4 h-full px-1 items-center nc-filter-input-wrapper !rounded-lg"
+    :class="{ 'px-2': hasExtraPadding, 'border-brand-500': isInputBoxOnFocus }"
     @mouseup.stop
   >
     <component
@@ -203,9 +235,21 @@ const hasExtraPadding = $computed(() => {
       :disabled="filter.readOnly"
       placeholder="Enter a value"
       :column="column"
-      class="flex"
+      class="flex !rounded-lg"
       v-bind="componentProps"
       location="filter"
+      @focus="isInputBoxOnFocus = true"
+      @blur="isInputBoxOnFocus = false"
     />
   </div>
 </template>
+
+<style lang="scss" scoped>
+:deep(input) {
+  @apply py-1.5;
+}
+
+:deep(.ant-picker) {
+  @apply !py-0;
+}
+</style>

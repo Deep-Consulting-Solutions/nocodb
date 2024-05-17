@@ -1,9 +1,8 @@
-import { expect } from '@playwright/test';
+import { expect, Locator } from '@playwright/test';
 import BasePage from '../../../Base';
 import { ToolbarFieldsPage } from './Fields';
 import { ToolbarSortPage } from './Sort';
 import { ToolbarFilterPage } from './Filter';
-import { ToolbarShareViewPage } from './ShareView';
 import { ToolbarViewMenuPage } from './ViewMenu';
 import * as fs from 'fs';
 import { GridPage } from '../../Grid';
@@ -17,33 +16,55 @@ import { ToolbarSearchDataPage } from './SearchData';
 import { RowHeight } from './RowHeight';
 import { MapPage } from '../../Map';
 import { getTextExcludeIconText } from '../../../../tests/utils/general';
+import { ToolbarGroupByPage } from './Groupby';
+import { ToolbarCalendarViewModePage } from './CalendarViewMode';
+import { CalendarPage } from '../../Calendar';
+import { ToolbarCalendarRangePage } from './CalendarRange';
 
 export class ToolbarPage extends BasePage {
-  readonly parent: GridPage | GalleryPage | FormPage | KanbanPage | MapPage;
+  readonly parent: GridPage | GalleryPage | FormPage | KanbanPage | MapPage | CalendarPage;
   readonly fields: ToolbarFieldsPage;
   readonly sort: ToolbarSortPage;
   readonly filter: ToolbarFilterPage;
-  readonly shareView: ToolbarShareViewPage;
+  readonly groupBy: ToolbarGroupByPage;
   readonly viewsMenu: ToolbarViewMenuPage;
   readonly actions: ToolbarActionsPage;
   readonly stackBy: ToolbarStackbyPage;
   readonly addEditStack: ToolbarAddEditStackPage;
   readonly searchData: ToolbarSearchDataPage;
   readonly rowHeight: RowHeight;
+  readonly calendarViewMode: ToolbarCalendarViewModePage;
+  readonly calendarRange: ToolbarCalendarRangePage;
 
-  constructor(parent: GridPage | GalleryPage | FormPage | KanbanPage | MapPage) {
+  readonly btn_fields: Locator;
+  readonly btn_sort: Locator;
+  readonly btn_filter: Locator;
+  readonly btn_rowHeight: Locator;
+  readonly btn_groupBy: Locator;
+  readonly btn_calendarSettings: Locator;
+
+  constructor(parent: GridPage | GalleryPage | FormPage | KanbanPage | MapPage | CalendarPage) {
     super(parent.rootPage);
     this.parent = parent;
     this.fields = new ToolbarFieldsPage(this);
     this.sort = new ToolbarSortPage(this);
     this.filter = new ToolbarFilterPage(this);
-    this.shareView = new ToolbarShareViewPage(this);
+    this.groupBy = new ToolbarGroupByPage(this);
     this.viewsMenu = new ToolbarViewMenuPage(this);
     this.actions = new ToolbarActionsPage(this);
     this.stackBy = new ToolbarStackbyPage(this);
     this.addEditStack = new ToolbarAddEditStackPage(this);
     this.searchData = new ToolbarSearchDataPage(this);
     this.rowHeight = new RowHeight(this);
+    this.calendarViewMode = new ToolbarCalendarViewModePage(this);
+    this.calendarRange = new ToolbarCalendarRangePage(this);
+
+    this.btn_fields = this.get().locator(`button.nc-fields-menu-btn`);
+    this.btn_sort = this.get().locator(`button.nc-sort-menu-btn`);
+    this.btn_filter = this.get().locator(`button.nc-filter-menu-btn`);
+    this.btn_rowHeight = this.get().locator(`button.nc-height-menu-btn`);
+    this.btn_groupBy = this.get().locator(`button.nc-group-by-menu-btn`);
+    this.btn_calendarSettings = this.get().getByTestId('nc-calendar-range-btn');
   }
 
   get() {
@@ -53,10 +74,18 @@ export class ToolbarPage extends BasePage {
   async clickActions() {
     const menuOpen = await this.actions.get().isVisible();
 
-    await this.get().locator(`button.nc-actions-menu-btn`).click();
+    await this.rootPage.locator(`div.nc-view-context-btn`).click();
 
     // Wait for the menu to close
     if (menuOpen) await this.fields.get().waitFor({ state: 'hidden' });
+  }
+
+  async clickCalendarViewSettings() {
+    const menuOpen = await this.calendarRange.get().isVisible();
+    await this.btn_calendarSettings.click();
+
+    // Wait for the menu to close
+    if (menuOpen) await this.calendarRange.get().waitFor({ state: 'hidden' });
   }
 
   async clickFields() {
@@ -66,6 +95,7 @@ export class ToolbarPage extends BasePage {
 
     // Wait for the menu to close
     if (menuOpen) await this.fields.get().waitFor({ state: 'hidden' });
+    else await this.fields.get().waitFor({ state: 'visible' });
   }
 
   async clickFindRowByScanButton() {
@@ -85,24 +115,34 @@ export class ToolbarPage extends BasePage {
     await expect(this.get().locator(`button.nc-fields-menu-btn`)).toBeVisible();
 
     // menu text
-    const fieldLocator = await this.get().locator(`button.nc-fields-menu-btn`);
+    const fieldLocator = this.get().locator(`button.nc-fields-menu-btn`);
     const fieldText = await getTextExcludeIconText(fieldLocator);
-    await expect(fieldText).toBe('Fields');
+    expect(fieldText).toBe('Fields');
 
     // icons count within fields menu button
-    expect(await this.get().locator(`button.nc-fields-menu-btn`).locator(`.material-symbols-outlined`).count()).toBe(2);
+    expect(await this.get().locator(`button.nc-fields-menu-btn`).locator(`.material-symbols`).count()).toBe(2);
   }
 
   async verifyFieldsButtonIsVisibleWithoutTextButIcon() {
     await expect(this.get().locator(`button.nc-fields-menu-btn`)).toBeVisible();
 
     // menu text
-    const fieldLocator = await this.get().locator(`button.nc-fields-menu-btn`);
+    const fieldLocator = this.get().locator(`button.nc-fields-menu-btn`);
     const fieldText = await getTextExcludeIconText(fieldLocator);
-    await expect(fieldText).not.toBe('Fields');
+    expect(fieldText).not.toBe('Fields');
 
     // icons count within fields menu button
-    expect(await this.get().locator(`button.nc-fields-menu-btn`).locator(`.material-symbols-outlined`).count()).toBe(2);
+    expect(await this.get().locator(`button.nc-fields-menu-btn`).locator(`.material-symbols`).count()).toBe(2);
+  }
+
+  async clickGroupBy() {
+    const menuOpen = await this.groupBy.get().isVisible();
+    await this.get().locator(`button.nc-group-by-menu-btn`).click();
+
+    // Wait for the menu to close
+    if (menuOpen) {
+      await this.groupBy.get().waitFor({ state: 'hidden' });
+    }
   }
 
   async clickFilter({
@@ -122,21 +162,13 @@ export class ToolbarPage extends BasePage {
         // Since on opening filter menu, api is called to fetch filter options, and will rerender the menu
         await this.waitForResponse({
           uiAction: clickFilterAction,
-          requestUrlPathToMatch: '/api/v1/db',
+          requestUrlPathToMatch: '/api/v1/',
           httpMethodsToMatch: ['GET'],
         });
       } else {
         await clickFilterAction();
       }
     }
-  }
-
-  async clickShareView() {
-    const menuOpen = await this.shareView.get().isVisible();
-    await this.get().locator(`button.nc-btn-share-view `).click();
-
-    // Wait for the menu to close
-    if (menuOpen) await this.shareView.get().waitFor({ state: 'hidden' });
   }
 
   async clickStackByField() {
@@ -166,7 +198,7 @@ export class ToolbarPage extends BasePage {
     // verify downloaded content against expected content
     const expectedData = fs.readFileSync(`./fixtures/${verificationFile}`, 'utf8').replace(/\r/g, '').split('\n');
     const file = fs.readFileSync('./output/at.txt', 'utf8').replace(/\r/g, '').split('\n');
-    await expect(file).toEqual(expectedData);
+    expect(file).toEqual(expectedData);
   }
 
   async clickRowHeight() {
@@ -177,7 +209,7 @@ export class ToolbarPage extends BasePage {
   async verifyStackByButton({ title }: { title: string }) {
     await this.get().locator(`.nc-toolbar-btn.nc-kanban-stacked-by-menu-btn`).waitFor({ state: 'visible' });
     await expect(
-      await this.get().locator(`.nc-toolbar-btn.nc-kanban-stacked-by-menu-btn:has-text("${title}")`)
+      this.get().locator(`.nc-toolbar-btn.nc-kanban-stacked-by-menu-btn:has-text("${title}")`)
     ).toBeVisible();
   }
 
@@ -186,53 +218,51 @@ export class ToolbarPage extends BasePage {
   }
 
   async clickAddEditStack() {
-    await this.get().locator(`.nc-kanban-add-edit-stack-menu-btn`).click();
+    await this.get().locator(`.nc-kanban-stacked-by-menu-btn`).click();
   }
 
   async validateViewsMenu(param: { role: string; mode?: string }) {
-    let menuItems = {
-      creator: ['Download', 'Upload', 'Shared View List', 'Webhooks', 'Get API Snippet', 'ERD View'],
-      editor: ['Download', 'Upload', 'Get API Snippet', 'ERD View'],
-      commenter: ['Download as CSV', 'Download as XLSX'],
-      viewer: ['Download as CSV', 'Download as XLSX'],
+    const menuItems = {
+      creator: ['Download', 'Upload'],
+      editor: ['Download', 'Upload'],
+      commenter: ['Download CSV', 'Download Excel'],
+      viewer: ['Download CSV', 'Download Excel'],
     };
-
-    if (param.mode === 'shareBase') {
-      menuItems = {
-        creator: [],
-        editor: ['Download', 'Upload', 'ERD View'],
-        commenter: [],
-        viewer: ['Download as CSV', 'Download as XLSX'],
-      };
-    }
-
-    const vMenu = await this.rootPage.locator('.nc-dropdown-actions-menu:visible');
-
-    for (const item of menuItems[param.role]) {
+    const vMenu = this.rootPage.locator('.nc-dropdown-actions-menu:visible');
+    for (const item of menuItems[param.role.toLowerCase()]) {
       await expect(vMenu).toContainText(item);
     }
   }
 
-  async validateRoleAccess(param: { role: string; mode?: string }) {
+  async verifyRoleAccess(param: { role: string; mode?: string }) {
+    const role = param.role.toLowerCase();
+
     await this.clickActions();
     await this.validateViewsMenu({
-      role: param.role,
+      role: role,
       mode: param.mode,
     });
+    await this.clickActions();
 
-    const menuItems = {
-      creator: ['Fields', 'Filter', 'Sort', 'Share View'],
-      editor: ['Fields', 'Filter', 'Sort'],
-      commenter: ['Fields', 'Filter', 'Sort', 'Download'],
-      viewer: ['Fields', 'Filter', 'Sort', 'Download'],
-    };
+    expect(await this.btn_fields.count()).toBe(1);
+    expect(await this.btn_filter.count()).toBe(1);
+    expect(await this.btn_sort.count()).toBe(1);
+    expect(await this.btn_rowHeight.count()).toBe(1);
+  }
 
-    for (const item of menuItems[param.role]) {
-      await expect(this.get()).toContainText(item);
-    }
+  async verifyLockMode() {
+    await expect(this.btn_fields).toBeDisabled();
+    await expect(this.btn_filter).toBeDisabled();
+    await expect(this.btn_sort).toBeDisabled();
+    await expect(this.btn_groupBy).toBeDisabled();
+    await expect(this.btn_rowHeight).toBeDisabled();
+  }
 
-    await expect(this.get().locator('.nc-add-new-row-btn')).toHaveCount(
-      param.role === 'creator' || param.role === 'editor' ? 1 : 0
-    );
+  async verifyCollaborativeMode() {
+    await expect(this.btn_fields).toBeEnabled();
+    await expect(this.btn_filter).toBeEnabled();
+    await expect(this.btn_sort).toBeEnabled();
+    await expect(this.btn_groupBy).toBeEnabled();
+    await expect(this.btn_rowHeight).toBeEnabled();
   }
 }

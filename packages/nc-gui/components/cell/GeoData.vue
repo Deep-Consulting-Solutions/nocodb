@@ -16,17 +16,17 @@ const emits = defineEmits<Emits>()
 
 const vModel = useVModel(props, 'modelValue', emits)
 
-let isExpanded = $ref(false)
+const isExpanded = ref(false)
 
-let isLoading = $ref(false)
+const isLoading = ref(false)
 
-let isLocationSet = $ref(false)
+const isLocationSet = ref(false)
 
 const [latitude, longitude] = (vModel.value || '').split(';')
 
 const latLongStr = computed(() => {
   const [latitude, longitude] = (vModel.value || '').split(';')
-  if (latitude) isLocationSet = true
+  if (latitude) isLocationSet.value = true
   return latitude && longitude ? `${latitude}; ${longitude}` : 'Set location'
 })
 
@@ -37,28 +37,28 @@ const formState = reactive({
 
 const handleFinish = () => {
   vModel.value = latLongToJoinedString(parseFloat(formState.latitude), parseFloat(formState.longitude))
-  isExpanded = false
+  isExpanded.value = false
 }
 
 const clear = () => {
-  isExpanded = false
+  isExpanded.value = false
 
   formState.latitude = latitude
   formState.longitude = longitude
 }
 
 const onClickSetCurrentLocation = () => {
-  isLoading = true
+  isLoading.value = true
   const onSuccess: PositionCallback = (position: GeolocationPosition) => {
     const crd = position.coords
     formState.latitude = `${crd.latitude}`
     formState.longitude = `${crd.longitude}`
-    isLoading = false
+    isLoading.value = false
   }
 
   const onError: PositionErrorCallback = (err: GeolocationPositionError) => {
     console.error(`ERROR(${err.code}): ${err.message}`)
-    isLoading = false
+    isLoading.value = false
   }
 
   const options = {
@@ -72,21 +72,22 @@ const onClickSetCurrentLocation = () => {
 const openInGoogleMaps = () => {
   const [latitude, longitude] = (vModel.value || '').split(';')
   const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`
-  window.open(url, '_blank')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 const openInOSM = () => {
   const [latitude, longitude] = (vModel.value || '').split(';')
   const url = `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=15/${latitude}/${longitude}`
-  window.open(url, '_blank')
+  window.open(url, '_blank', "'noopener,noreferrer'")
 }
 </script>
 
 <template>
-  <a-dropdown :is="isExpanded ? AModal : 'div'" v-model:visible="isExpanded" trigger="click">
+  <a-dropdown :is="isExpanded ? AModal : 'div'" v-model:visible="isExpanded" :trigger="['click']">
     <div
       v-if="!isLocationSet"
-      class="group cursor-pointer flex gap-1 items-center mx-auto max-w-64 justify-center active:(ring ring-accent ring-opacity-100) rounded border-1 p-1 shadow-sm hover:(bg-primary bg-opacity-10) dark:(!bg-slate-500)"
+      class="group cursor-pointer flex gap-1 items-center mx-auto max-w-64 justify-center active:(ring ring-accent ring-opacity-100) rounded border-1 p-1 shadow-sm hover:(bg-primary bg-opacity-10) dark:(!bg-slate-500) my-1"
+      tabindex="0"
     >
       <div class="flex items-center gap-2" data-testid="nc-geo-data-set-location-button">
         <component
@@ -98,9 +99,16 @@ const openInOSM = () => {
         </div>
       </div>
     </div>
-    <div v-else data-testid="nc-geo-data-lat-long-set">{{ latLongStr }}</div>
+    <div
+      v-else
+      data-testid="nc-geo-data-lat-long-set"
+      tabindex="0"
+      class="nc-cell-field h-full w-full flex items-center py-1 focus-visible:!outline-none focus:!outline-none"
+    >
+      {{ latLongStr }}
+    </div>
     <template #overlay>
-      <a-form :model="formState" class="flex flex-col w-max-64" @finish="handleFinish">
+      <a-form :model="formState" class="flex flex-col w-max-64 border-1 border-gray-200" @finish="handleFinish">
         <a-form-item>
           <div class="flex mt-4 items-center mx-2">
             <div class="mr-2">{{ $t('labels.lat') }}:</div>

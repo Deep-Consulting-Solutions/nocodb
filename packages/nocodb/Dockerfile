@@ -20,7 +20,7 @@ RUN cp $GOPATH/bin/litestream /usr/src/lt
 ###########
 # Builder
 ###########
-FROM node:16.17.0-alpine3.15 as builder
+FROM node:18.19.1-alpine as builder
 ARG ACCESS_TOKEN
 ENV TOKEN_FOR_PACKAGES=${ACCESS_TOKEN}
 
@@ -29,24 +29,27 @@ WORKDIR /usr/src/app
 # install node-gyp dependencies
 RUN apk add --no-cache python3 make g++
 
+# install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 # Copy application dependency manifests to the container image.
-# A wildcard is used to ensure both package.json AND package-lock.json are copied.
-# Copying this separately prevents re-running npm ci on every code change.
-COPY ./package*.json ./
+COPY ./package.json ./package.json
 COPY ./docker/main.js ./docker/main.js
 #COPY ./docker/start.sh /usr/src/appEntry/start.sh
 COPY ./docker/start-litestream.sh /usr/src/appEntry/start.sh
-COPY ./src/lib/public/css/*.css ./docker/public/css/
-COPY ./src/lib/public/js/*.js ./docker/public/js/
-COPY ./src/lib/public/favicon.ico ./docker/public/
+COPY src/public/ ./docker/public/
+
+# for pnpm to generate a flat node_modules without symlinks
+# so that modclean could work as expected
+RUN echo "node-linker=hoisted" > .npmrc
 
 # install production dependencies,
 # reduce node_module size with modclean & removing sqlite deps,
 # package built code into app.tar.gz & add execute permission to start.sh
 RUN printf "@deep-consulting-solutions:registry=https://npm.pkg.github.com/\nalways-auth=true\n//npm.pkg.github.com/:_authToken=%s" $TOKEN_FOR_PACKAGES >> .npmrc
 
-RUN npm ci --omit=dev --quiet \
-    && npx modclean --patterns="default:*" --ignore="@deep-consulting-solutions/nc-lib-gui/**,@deep-consulting-solutions/incident-handling/**,typeorm/**,highlight.js/**,cli-highlight/**,nc-lib-gui/**,dayjs/**,express-status-monitor/**,@azure/msal-node/dist/**" --run  \
+RUN pnpm install --prod --shamefully-hoist \
+    && pnpm dlx modclean --patterns="default:*" --ignore="@deep-consulting-solutions/nc-lib-gui/**,@deep-consulting-solutions/incident-handling/**,typeorm/**,highlight.js/**,cli-highlight/**,nc-lib-gui/**,dayjs/**,express-status-monitor/**,@azure/msal-node/dist/**" --run  \
     && rm -rf ./node_modules/sqlite3/deps \
     && tar -czf ../appEntry/app.tar.gz ./* \
     && chmod +x /usr/src/appEntry/start.sh
@@ -54,7 +57,7 @@ RUN npm ci --omit=dev --quiet \
 ##########
 # Runner
 ##########
-FROM alpine:3.15
+FROM alpine:3.19
 WORKDIR /usr/src/app
 
 ENV NC_DOCKER 0.6
@@ -68,7 +71,7 @@ RUN apk --update --no-cache add \
     dumb-init
 
 # Copy litestream binary build
-COPY  --from=lt-builder /usr/src/lt /usr/src/appEntry/litestream
+COPY --from=lt-builder /usr/src/lt /usr/src/appEntry/litestream
 # Copy packaged production code & main entry file
 COPY --from=builder /usr/src/appEntry/ /usr/src/appEntry/
 COPY entrypoint.sh /entrypoint.sh

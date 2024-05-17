@@ -1,4 +1,4 @@
-import { NormalColumnRequestType } from '../Api'
+import { NormalColumnRequestType } from '../Api';
 import UITypes from '../UITypes';
 import { IDType } from './index';
 
@@ -183,8 +183,8 @@ export class OracleUi {
   //       return '';
   //       break;
   //     case "longtext":
-  //       return ''
   //       break;
+  //       return ''
   //     case "binary":
   //       return 255;
   //       break;
@@ -689,7 +689,7 @@ export class OracleUi {
   }
 
   static getAbstractType(col): any {
-    switch ((col.dt || col.dt).toLowerCase()) {
+    switch (col.dt?.toLowerCase()) {
       case 'integer':
         return 'integer';
       case 'bfile':
@@ -775,7 +775,7 @@ export class OracleUi {
       case 'date':
         return 'Date';
       case 'datetime':
-        return 'CreateTime';
+        return 'CreatedTime';
       case 'time':
         return 'Time';
       case 'year':
@@ -915,7 +915,7 @@ export class OracleUi {
       case 'DateTime':
         colProp.dt = 'timestamp';
         break;
-      case 'CreateTime':
+      case 'CreatedTime':
         colProp.dt = 'timestamp';
         break;
       case 'LastModifiedTime':
@@ -938,7 +938,18 @@ export class OracleUi {
   }
 
   static getUnsupportedFnList() {
-    return [];
+    return [
+      'XOR',
+      'REGEX_MATCH',
+      'REGEX_EXTRACT',
+      'REGEX_REPLACE',
+      'VALUE',
+      'COUNTA',
+      'COUNT',
+      'ROUNDDOWN',
+      'ROUNDUP',
+      'DATESTR',
+    ];
   }
 }
 

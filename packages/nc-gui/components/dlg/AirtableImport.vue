@@ -1,43 +1,39 @@
 <script setup lang="ts">
-import type { Socket } from 'socket.io-client'
-import io from 'socket.io-client'
 import type { Card as AntCard } from 'ant-design-vue'
 import {
   Form,
+  JobStatus,
   computed,
   extractSdkResponseErrorMsg,
   fieldRequiredValidator,
   iconMap,
   message,
   nextTick,
-  onBeforeUnmount,
   onMounted,
   ref,
-  storeToRefs,
-  useGlobal,
   useNuxtApp,
-  useProject,
   watch,
 } from '#imports'
 
-const { modelValue, baseId } = defineProps<{
+const { modelValue, baseId, sourceId } = defineProps<{
   modelValue: boolean
   baseId: string
+  sourceId: string
 }>()
 
 const emit = defineEmits(['update:modelValue'])
 
-const { appInfo } = $(useGlobal())
+const { $api } = useNuxtApp()
 
-const baseURL = appInfo.ncSiteUrl
+const baseURL = $api.instance.defaults.baseURL
 
-const { $state } = useNuxtApp()
+const { $state, $poller } = useNuxtApp()
 
-const projectStore = useProject()
+const baseStore = useBase()
 
-const { loadTables } = projectStore
+const { refreshCommandPalette } = useCommandPalette()
 
-const { project } = storeToRefs(projectStore)
+const { loadTables } = baseStore
 
 const showGoToDashboardButton = ref(false)
 
@@ -49,7 +45,9 @@ const logRef = ref<typeof AntCard>()
 
 const enableAbort = ref(false)
 
-let socket: Socket | null
+const goBack = ref(false)
+
+const listeningForUpdates = ref(false)
 
 const syncSource = ref({
   id: '',
@@ -59,6 +57,7 @@ const syncSource = ref({
     syncDirection: 'Airtable to NocoDB',
     syncRetryCount: 1,
     apiKey: '',
+    appId: '',
     shareId: '',
     syncSourceUrlOrId: '',
     options: {
@@ -68,9 +67,39 @@ const syncSource = ref({
       syncLookup: true,
       syncFormula: false,
       syncAttachment: true,
+      syncUsers: true,
     },
   },
 })
+
+const pushProgress = async (message: string, status: JobStatus | 'progress') => {
+  progress.value.push({ msg: message, status })
+
+  await nextTick(() => {
+    const container: HTMLDivElement = logRef.value?.$el?.firstElementChild
+    if (!container) return
+    container.scrollTop = container.scrollHeight
+  })
+}
+
+const onStatus = async (status: JobStatus, data?: any) => {
+  if (status === JobStatus.COMPLETED) {
+    showGoToDashboardButton.value = true
+    await loadTables()
+    pushProgress('Done!', status)
+    refreshCommandPalette()
+    // TODO: add tab of the first table
+  } else if (status === JobStatus.FAILED) {
+    await loadTables()
+    goBack.value = true
+    pushProgress(data.error.message, status)
+    refreshCommandPalette()
+  }
+}
+
+const onLog = (data: { message: string }) => {
+  pushProgress(data.message, 'progress')
+}
 
 const validators = computed(() => ({
   'details.apiKey': [fieldRequiredValidator()],
@@ -88,7 +117,10 @@ const { validateInfos } = useForm(syncSource, validators)
 
 const disableImportButton = computed(() => !syncSource.value.details.apiKey || !syncSource.value.details.syncSourceUrlOrId)
 
+const isLoading = ref(false)
+
 async function saveAndSync() {
+  isLoading.value = true
   await createOrUpdate()
   await sync()
 }
@@ -105,7 +137,7 @@ async function createOrUpdate() {
         body: payload,
       })
     } else {
-      syncSource.value = await $fetch(`/api/v1/db/meta/projects/${project.value.id}/syncs/${baseId}`, {
+      syncSource.value = await $fetch(`/api/v1/db/meta/projects/${baseId}/syncs/${sourceId}`, {
         baseURL,
         method: 'POST',
         headers: { 'xc-auth': $state.token.value as string },
@@ -117,8 +149,48 @@ async function createOrUpdate() {
   }
 }
 
+async function listenForUpdates(id?: string) {
+  if (listeningForUpdates.value) return
+
+  listeningForUpdates.value = true
+
+  const job = id ? { id } : await $api.jobs.status({ syncId: syncSource.value.id })
+
+  if (!job) {
+    listeningForUpdates.value = false
+    return
+  }
+
+  $poller.subscribe(
+    { id: job.id },
+    (data: {
+      id: string
+      status?: string
+      data?: {
+        error?: {
+          message: string
+        }
+        message?: string
+        result?: any
+      }
+    }) => {
+      if (data.status !== 'close') {
+        step.value = 2
+        if (data.status) {
+          onStatus(data.status as JobStatus, data.data)
+        } else {
+          onLog(data.data as any)
+        }
+      } else {
+        listeningForUpdates.value = false
+        isLoading.value = false
+      }
+    },
+  )
+}
+
 async function loadSyncSrc() {
-  const data: any = await $fetch(`/api/v1/db/meta/projects/${project.value.id}/syncs/${baseId}`, {
+  const data: any = await $fetch(`/api/v1/db/meta/projects/${baseId}/syncs/${sourceId}`, {
     baseURL,
     method: 'GET',
     headers: { 'xc-auth': $state.token.value as string },
@@ -129,8 +201,9 @@ async function loadSyncSrc() {
   if (srcs && srcs[0]) {
     srcs[0].details = srcs[0].details || {}
     syncSource.value = migrateSync(srcs[0])
-    syncSource.value.details.syncSourceUrlOrId = srcs[0].details.shareId
-    socket?.emit('subscribe', syncSource.value.id)
+    syncSource.value.details.syncSourceUrlOrId =
+      srcs[0].details.appId && srcs[0].details.appId.length > 0 ? srcs[0].details.syncSourceUrlOrId : srcs[0].details.shareId
+    listenForUpdates()
   } else {
     syncSource.value = {
       id: '',
@@ -140,6 +213,7 @@ async function loadSyncSrc() {
         syncDirection: 'Airtable to NocoDB',
         syncRetryCount: 1,
         apiKey: '',
+        appId: '',
         shareId: '',
         syncSourceUrlOrId: '',
         options: {
@@ -149,6 +223,7 @@ async function loadSyncSrc() {
           syncLookup: true,
           syncFormula: false,
           syncAttachment: true,
+          syncUsers: true,
         },
       },
     }
@@ -157,15 +232,12 @@ async function loadSyncSrc() {
 
 async function sync() {
   try {
-    await $fetch(`/api/v1/db/meta/syncs/${syncSource.value.id}/trigger`, {
+    const jobData: any = await $fetch(`/api/v1/db/meta/syncs/${syncSource.value.id}/trigger`, {
       baseURL,
       method: 'POST',
       headers: { 'xc-auth': $state.token.value as string },
-      params: {
-        id: socket?.id,
-      },
     })
-    socket?.emit('subscribe', syncSource.value.id)
+    listenForUpdates(jobData.id)
   } catch (e: any) {
     message.error(await extractSdkResponseErrorMsg(e))
   }
@@ -183,16 +255,23 @@ async function abort() {
           baseURL,
           method: 'POST',
           headers: { 'xc-auth': $state.token.value as string },
-          params: {
-            id: socket?.id,
-          },
         })
         step.value = 1
+        progress.value = []
+        goBack.value = false
+        enableAbort.value = false
       } catch (e: any) {
         message.error(await extractSdkResponseErrorMsg(e))
       }
     },
   })
+}
+
+function cancel() {
+  step.value = 1
+  progress.value = []
+  goBack.value = false
+  enableAbort.value = false
 }
 
 function migrateSync(src: any) {
@@ -218,78 +297,44 @@ watch(
     if (syncSource.value.details) {
       const m = v && v.match(/(exp|shr).{14}/g)
       syncSource.value.details.shareId = m ? m[0] : ''
+      const m2 = v && v.match(/(app).{14}/g)
+      syncSource.value.details.appId = m2 ? m2[0] : ''
     }
   },
 )
 
 onMounted(async () => {
-  socket = io(new URL(baseURL, window.location.href.split(/[?#]/)[0]).href, {
-    extraHeaders: { 'xc-auth': $state.token.value as string },
-  })
-
-  socket.on('progress', async (d: Record<string, any>) => {
-    progress.value.push(d)
-
-    await nextTick(() => {
-      const container: HTMLDivElement = logRef.value?.$el?.firstElementChild
-      if (!container) return
-      container.scrollTop = container.scrollHeight
-    })
-
-    if (d.status === 'COMPLETED') {
-      showGoToDashboardButton.value = true
-      await loadTables()
-      // TODO: add tab of the first table
-    }
-  })
-
-  socket.on('disconnect', () => {
-    console.log('socket disconnected')
-    const rcInterval = setInterval(() => {
-      if (socket?.connected) {
-        clearInterval(rcInterval)
-        socket?.emit('subscribe', syncSource.value.id)
-      } else {
-        socket?.connect()
-      }
-    }, 2000)
-  })
-
-  socket.on('job', () => {
-    step.value = 2
-  })
-
-  // connect event does not provide data
-  socket.on('connect', () => {
-    console.log('socket connected')
-    if (syncSource.value.id) {
-      socket?.emit('subscribe', syncSource.value.id)
-    }
-  })
-
-  socket?.io.on('reconnect', () => {
-    console.log('socket reconnected')
-    if (syncSource.value.id) {
-      socket?.emit('subscribe', syncSource.value.id)
-    }
-  })
-
+  if (syncSource.value.id) {
+    listenForUpdates()
+  }
   await loadSyncSrc()
 })
 
-onBeforeUnmount(() => {
-  if (socket) {
-    socket.off('disconnect')
-    socket.disconnect()
-    socket.removeAllListeners()
+function downloadLogs(filename: string) {
+  let text = ''
+  for (const o of document.querySelectorAll('.nc-modal-airtable-import .log-message')) {
+    text += `${o.textContent}\n`
   }
-})
+  const element = document.createElement('a')
+  element.setAttribute('href', `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`)
+  element.setAttribute('download', filename)
+
+  element.style.display = 'none'
+  document.body.appendChild(element)
+
+  element.click()
+
+  document.body.removeChild(element)
+}
 </script>
 
 <template>
   <a-modal
     v-model:visible="dialogShow"
     :class="{ active: dialogShow }"
+    :closable="step !== 2"
+    :keyboard="step !== 2"
+    :mask-closable="step !== 2"
     width="max(30vw, 600px)"
     class="p-2"
     wrap-class-name="nc-modal-airtable-import"
@@ -297,7 +342,7 @@ onBeforeUnmount(() => {
   >
     <div class="px-5">
       <!--      Quick Import -->
-      <div class="mt-5 prose-xl font-weight-bold" @dblclick="enableAbort = true">{{ $t('title.quickImport') }} - AIRTABLE</div>
+      <div class="mt-5 prose-xl font-weight-bold" @dblclick="enableAbort = true">{{ $t('title.quickImportAirtable') }}</div>
 
       <div v-if="step === 1">
         <div class="mb-4">
@@ -305,9 +350,10 @@ onBeforeUnmount(() => {
           <span class="mr-3 pt-2 text-gray-500 text-xs">{{ $t('general.credentials') }}</span>
           <!--          Where to find this? -->
           <a
-            href="https://docs.nocodb.com/setup-and-usages/import-airtable-to-sql-database-within-a-minute-for-free/#get-airtable-credentials"
+            href="https://docs.nocodb.com/bases/import-base-from-airtable#get-airtable-credentials"
             class="prose-sm underline text-grey text-xs"
             target="_blank"
+            rel="noopener"
           >
             {{ $t('msg.info.airtable.credentials') }}
           </a>
@@ -318,7 +364,7 @@ onBeforeUnmount(() => {
             <a-input-password
               v-model:value="syncSource.details.apiKey"
               class="nc-input-api-key"
-              :placeholder="$t('labels.apiKey')"
+              :placeholder="`${$t('labels.apiKey')} / ${$t('labels.personalAccessToken')}`"
               size="large"
             />
           </a-form-item>
@@ -327,7 +373,7 @@ onBeforeUnmount(() => {
             <a-input
               v-model:value="syncSource.details.syncSourceUrlOrId"
               class="nc-input-shared-base"
-              :placeholder="`${$t('labels.sharedBase')} ID / URL`"
+              :placeholder="`${$t('labels.sharedBaseUrl')}`"
               size="large"
             />
           </a-form-item>
@@ -370,10 +416,17 @@ onBeforeUnmount(() => {
             </a-checkbox>
           </div>
 
+          <!--          Import Users Columns -->
+          <div class="my-2">
+            <a-checkbox v-model:checked="syncSource.details.options.syncUsers">
+              {{ $t('labels.importUsers') }}
+            </a-checkbox>
+          </div>
+
           <!--          Import Formula Columns -->
           <a-tooltip placement="top">
             <template #title>
-              <span>Coming Soon!</span>
+              <span>{{ $t('title.comingSoon') }}</span>
             </template>
             <a-checkbox v-model:checked="syncSource.details.options.syncFormula" disabled>
               {{ $t('labels.importFormulaColumns') }}
@@ -385,7 +438,7 @@ onBeforeUnmount(() => {
 
         <!--        Questions / Help - Reach out here -->
         <div>
-          <a href="https://github.com/nocodb/nocodb/issues/2052" target="_blank">
+          <a href="https://github.com/nocodb/nocodb/issues/2052" target="_blank" rel="noopener noreferrer">
             {{ $t('general.questions') }} / {{ $t('general.help') }} - {{ $t('general.reachOut') }}</a
           >
 
@@ -393,7 +446,12 @@ onBeforeUnmount(() => {
           <!--          This feature is currently in beta and more information can be found here -->
           <div>
             {{ $t('general.betaNote') }}
-            <a class="prose-sm" href="https://github.com/nocodb/nocodb/discussions/2122" target="_blank">
+            <a
+              class="prose-sm"
+              href="https://github.com/nocodb/nocodb/discussions/2122"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {{ $t('general.moreInfo') }}
             </a>
             .
@@ -406,17 +464,25 @@ onBeforeUnmount(() => {
         <div class="mb-4 prose-xl font-bold">{{ $t('general.logs') }}</div>
 
         <a-card ref="logRef" :body-style="{ backgroundColor: '#000000', height: '400px', overflow: 'auto' }">
+          <a-button
+            v-if="showGoToDashboardButton || goBack"
+            class="!absolute mr-1 mb-1 z-1 right-0 bottom-0 opacity-40 hover:opacity-100"
+            size="small"
+            @click="downloadLogs('at-import-logs.txt')"
+          >
+            <component :is="iconMap.download" class="text-green-500" />
+          </a-button>
           <div v-for="({ msg, status }, i) in progress" :key="i">
-            <div v-if="status === 'FAILED'" class="flex items-center">
+            <div v-if="status === JobStatus.FAILED" class="flex items-center">
               <component :is="iconMap.closeCircle" class="text-red-500" />
 
-              <span class="text-red-500 ml-2">{{ msg }}</span>
+              <span class="text-red-500 ml-2 log-message">{{ msg }}</span>
             </div>
 
             <div v-else class="flex items-center">
               <MdiCurrencyUsd class="text-green-500" />
 
-              <span class="text-green-500 ml-2">{{ msg }}</span>
+              <span class="text-green-500 ml-2 log-message">{{ msg }}</span>
             </div>
           </div>
 
@@ -424,7 +490,8 @@ onBeforeUnmount(() => {
             v-if="
               !progress ||
               !progress.length ||
-              (progress[progress.length - 1].status !== 'COMPLETED' && progress[progress.length - 1].status !== 'FAILED')
+              (progress[progress.length - 1].status !== JobStatus.COMPLETED &&
+                progress[progress.length - 1].status !== JobStatus.FAILED)
             "
             class="flex items-center"
           >
@@ -439,7 +506,12 @@ onBeforeUnmount(() => {
           <a-button v-if="showGoToDashboardButton" class="mt-4" size="large" @click="dialogShow = false">
             {{ $t('labels.goToDashboard') }}
           </a-button>
-          <a-button v-else-if="enableAbort" class="mt-4" size="large" danger @click="abort()">ABORT</a-button>
+          <a-button v-else-if="goBack" class="mt-4 uppercase" size="large" danger @click="cancel()">{{
+            $t('general.cancel')
+          }}</a-button>
+          <a-button v-else-if="enableAbort" class="mt-4 uppercase" size="large" danger @click="abort()">{{
+            $t('general.abort')
+          }}</a-button>
         </div>
       </div>
     </div>
@@ -453,6 +525,7 @@ onBeforeUnmount(() => {
           v-e="['c:sync-airtable:save-and-sync']"
           type="primary"
           class="nc-btn-airtable-import"
+          :loading="isLoading"
           :disabled="disableImportButton"
           @click="saveAndSync"
         >

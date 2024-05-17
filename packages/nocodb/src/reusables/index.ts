@@ -1,6 +1,6 @@
 import IncidentHandler from '@deep-consulting-solutions/incident-handling';
+import RedisCacheMgr from 'src/cache/RedisCacheMgr';
 import { DataRecoveryActivity, ServerIncident } from '../database/entities';
-import RedisCacheMgr from '../lib/cache/RedisCacheMgr';
 import { getRedisURI } from '../database/redis';
 import type { IncidentHandlerOptions } from '@deep-consulting-solutions/incident-handling';
 import type { Application } from 'express';
@@ -25,7 +25,7 @@ export const getIncidentHandlerConfig = ({
   let ticketBlueprintTransitions = [];
   try {
     ticketBlueprintTransitions = JSON.parse(
-      process.env.INCIDENT_HANDLING_DESK_TICKET_RESOLUTION_BLUEPRINTS
+      process.env.INCIDENT_HANDLING_DESK_TICKET_RESOLUTION_BLUEPRINTS,
     );
   } catch (e) {}
 
@@ -76,7 +76,7 @@ export const getIncidentHandlerConfig = ({
 
 export const setupReusablesAndRoutes = async (
   app: any,
-  connection: Connection
+  connection: Connection,
 ) => {
   await IncidentHandler.setup(getIncidentHandlerConfig({ app, connection }));
 };

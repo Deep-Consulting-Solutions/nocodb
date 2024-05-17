@@ -1,17 +1,16 @@
 import EventEmitter from 'events';
 import { isEqual, merge, pick } from 'lodash';
 import { nocoExecute } from 'nc-help';
-import { Hook, Model, Project } from '../../models';
-import { XKnex } from '../../db/sql-data-mapper';
-import { MetaTable } from '../../utils/globals';
-import NcConnectionMgrv2 from '../../utils/common/NcConnectionMgrv2';
-import getAst from '../../db/sql-data-mapper/lib/sql/helpers/getAst';
-import { sanitize } from '../../db/sql-data-mapper/lib/sql/helpers/sanitize';
-import { invokeWebhook } from '../../meta/helpers/webhookHelpers';
-import type NcMetaIO from '../../meta/NcMetaIO';
+import { invokeWebhook } from 'src/helpers/webhookHelpers';
+import { sanitize } from 'src/helpers/sqlSanitize';
+import NcConnectionMgrv2 from 'src/utils/common/NcConnectionMgrv2';
+import { Base, Hook, Model } from 'src/models';
+import { MetaTable } from 'src/utils/globals';
+import { XKnex } from 'src/db/CustomKnex';
+import getAst from 'src/helpers/getAst';
+import type { Source } from 'src/models';
 import type { HookType } from 'nocodb-sdk';
-import type { Base } from '../../models';
-import type Connection from 'mysql2/typings/mysql/lib/Connection';
+import type { Connection } from 'mysql2/typings/mysql/lib/Connection';
 
 export type PSQLRecordOperationEvent = {
   base: Base;
@@ -21,8 +20,18 @@ export type PSQLRecordOperationEvent = {
   newData: Record<string, any>;
 };
 
+type NcMetaIO = {
+  metaList2: (
+    projectId: string,
+    baseId: string,
+    models: string,
+    params: any,
+  ) => Promise<Record<string, unknown>[]>;
+};
+
 type IBaseData = {
   base: Base;
+  source: Source;
   models: Model[];
   knex: XKnex;
   connectionOptions: { [k: string]: any; database: string };
@@ -55,17 +64,17 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   private log(
     message: string,
     extraData?: any,
-    level: 'log' | 'error' | 'warn' | 'info' = 'log'
+    level: 'log' | 'error' | 'warn' | 'info' = 'log',
   ) {
     console[level](
       `${PSQLRecordOperationWatcher.name} : ${message}`,
-      extraData
+      extraData,
     );
   }
 
   private throttleAndConsumeNotifications(
     baseData: IBaseData,
-    delayMillis?: number
+    delayMillis?: number,
   ) {
     if (baseData.throttleTaskId != undefined) return;
 
@@ -77,7 +86,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   private async convertDBDataToModelData(
     baseData: IBaseData,
     model: Model,
-    dbData: Record<string, any>
+    dbData: Record<string, any>,
   ) {
     const columns = await model.getColumns();
 
@@ -85,15 +94,15 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       (modelData, column) => ({
         ...modelData,
         [sanitize(column.title || column.column_name)]: sanitize(
-          dbData[column.column_name]
+          dbData[column.column_name],
         ),
       }),
-      {} as Record<string, any>
+      {} as Record<string, any>,
     );
 
     const baseModel = await Model.getBaseModelSQL({
       id: model.id,
-      dbDriver: await NcConnectionMgrv2.get(baseData.base),
+      dbDriver: await NcConnectionMgrv2.get(baseData.source),
     });
 
     if (modelData) {
@@ -111,7 +120,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   private async consumeNotifications(baseData: IBaseData, forDestroy = false) {
     const notificationsTableName = this.createSqlIdentifier(
       baseData,
-      'notifications_table'
+      'notifications_table',
     );
 
     const perPage = this.consumptionBatchCount;
@@ -137,7 +146,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       .knex(notificationsTableName)
       .whereIn(
         'id',
-        baseData.knex(notificationsTableName).select('id').limit(perPage)
+        baseData.knex(notificationsTableName).select('id').limit(perPage),
       )
       .returning('*')
       .delete();
@@ -146,8 +155,8 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       this.log(
         'consuming notifications : ',
         notifications.map((notification) =>
-          pick(notification, ['nocodbModelId'])
-        )
+          pick(notification, ['nocodbModelId']),
+        ),
       );
     }
 
@@ -165,7 +174,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
           newData: newDBData,
         }) => {
           const model = baseData.models.find(
-            (model) => model.id === nocodbModelId
+            (model) => model.id === nocodbModelId,
           );
           if (!model) {
             // TODO: Log this error
@@ -187,14 +196,14 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
             model,
           };
           this.emit(this.recordOperationEventType, eventData);
-        }
-      )
+        },
+      ),
     );
   }
 
   private async registerListeners(
     baseDataForRef: IBaseData,
-    connection: Connection
+    connection: Connection,
   ) {
     let rewatchHandled = false;
 
@@ -270,7 +279,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
     const notificationsTableName = this.createSqlIdentifier(
       baseData,
-      'notifications_table'
+      'notifications_table',
     );
     // esa_nocodb_bmh_notifcations_table
 
@@ -316,7 +325,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
       const triggerName = this.createSqlIdentifier(
         baseData,
-        `${tableName}__trigger`
+        `${tableName}__trigger`,
       );
       // esa_nocodb_bmh_{tableName}__trigger
 
@@ -334,37 +343,37 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
       // any trigger that exist is always dropped, if it is to be recreated
       this.log(
-        `about to run dropTriggerQuery for ${triggerName} on  ${tableName}`
+        `about to run dropTriggerQuery for ${triggerName} on  ${tableName}`,
       );
       await baseData.knex.raw(dropTriggerQuery);
       this.log(
-        `finished running dropTriggerQuery for ${triggerName} on  ${tableName}`
+        `finished running dropTriggerQuery for ${triggerName} on  ${tableName}`,
       );
 
       this.log(
-        `about to run createTriggerQuery for ${triggerName} on  ${tableName}`
+        `about to run createTriggerQuery for ${triggerName} on  ${tableName}`,
       );
       await baseData.knex.raw(createTriggerQuery).catch((error: any) => {
         this.log(
           `Warning - Trigger not created on "${tableName}" probably because it does not exist. Analysis the stacktrace: ${
             error?.message || error
           }`,
-          error
+          error,
         );
       });
       this.log(
-        `finished running createTriggerQuery for ${triggerName} on  ${tableName}`
+        `finished running createTriggerQuery for ${triggerName} on  ${tableName}`,
       );
     }
   }
 
   private async disposeSQLResourcesForModel(
     baseData: IBaseData,
-    { table_name: tableName }: Model
+    { table_name: tableName }: Model,
   ) {
     const oldTriggerName = this.createSqlIdentifier(
       baseData,
-      `${tableName}__trigger`
+      `${tableName}__trigger`,
     );
     const dropOldTriggerQuery = `DROP TRIGGER IF EXISTS ${oldTriggerName} on ${tableName}`;
     await baseData.knex.raw(dropOldTriggerQuery);
@@ -373,7 +382,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   private async disposeSQLResources(baseData: IBaseData) {
     const notificationsTableName = this.createSqlIdentifier(
       baseData,
-      'notifications_table'
+      'notifications_table',
     );
     const notificationsTableCreateQuery = `
     DROP TABLE IF EXISTS "${notificationsTableName}";
@@ -397,27 +406,25 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     return this._watchBaseInternal(base, false);
   }
 
-  private async _watchBaseInternal(base: Base, rewatch: boolean) {
-    if (!base.id) {
-      // TODO: Log this error and report as incident
-      return;
-    }
-
-    if (base.is_meta) return;
-
+  private async _watchBaseInternalAndSource(
+    base: Base,
+    source: Source,
+    rewatch: boolean,
+  ) {
+    const project = await source.getProject();
     const foundModelData: Record<string, any>[] = await this.ncMeta.metaList2(
-      base.project_id,
+      project.id,
       base.id,
       MetaTable.MODELS,
       {
         condition: {
           type: 'table',
         },
-      }
+      },
     );
 
     const models = foundModelData.map(
-      (foundModelDatum) => new Model(foundModelDatum)
+      (foundModelDatum) => new Model(foundModelDatum),
     );
 
     const obsoleteModels: Model[] = [];
@@ -427,10 +434,10 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
     let baseData: IBaseData = this.allBaseData.get(base.id);
 
-    this.log(`watching base ${base.alias}`);
-    this.log(`watching base ${base.id}`);
+    this.log(`watching source ${source.alias}`);
+    this.log(`watching base ${source.id}`);
 
-    const connectionOptions = (await base.getConnectionConfig()).connection;
+    const connectionOptions = (await source.getConnectionConfig()).connection;
 
     const createNewBaseData =
       !baseData ||
@@ -445,12 +452,13 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     }
 
     if (createNewBaseData) {
-      const knex = await this.createKnex(base);
+      const knex = await this.createKnex(base, source);
       baseData = {
         base,
         models,
         knex,
         connectionOptions,
+        source,
       };
 
       newModels.push(...models);
@@ -458,11 +466,11 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       //////// this never even gets used as baseData will be empty
       const modelIds = models.map((model) => model.id); /////// //////// //  why is tablename being mapped to modelIDs
       obsoleteModels.push(
-        ...baseData.models.filter((model) => !modelIds.includes(model.id))
+        ...baseData.models.filter((model) => !modelIds.includes(model.id)),
       );
       const prevModelIds = baseData.models.map((model) => model.id); // this will always be empty, add logs to see intdev tests
       newModels.push(
-        ...models.filter((model) => !prevModelIds.includes(model.id))
+        ...models.filter((model) => !prevModelIds.includes(model.id)),
       );
 
       baseData.base = base;
@@ -484,7 +492,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       (results, newModel) => {
         results[
           newModel.table_name.startsWith(
-            this.createSqlIdentifierPrefix(baseData)
+            this.createSqlIdentifierPrefix(baseData),
           ) ||
           (!shouldWatchAuditTables && newModel.table_name.endsWith('_audit'))
             ? 1
@@ -492,26 +500,26 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
         ].push(newModel);
         return results;
       },
-      [[], []]
+      [[], []],
     );
 
     const pickedFields = ['id', 'table_name', 'title'];
     this.log(
       `watching base : ${base.id} , ${
-        (await base.getConnectionConfig()).database
-      }`
+        (await source.getConnectionConfig()).database
+      }`,
     );
     this.log(
       `watched models`,
-      newModels.map((model) => pick(model, pickedFields))
+      newModels.map((model) => pick(model, pickedFields)),
     );
     this.log(
       'skipped models',
-      skippedModels.map((model) => pick(model, pickedFields))
+      skippedModels.map((model) => pick(model, pickedFields)),
     );
     this.log(
       'obsolete models',
-      obsoleteModels.map((model) => pick(model, pickedFields))
+      obsoleteModels.map((model) => pick(model, pickedFields)),
     );
 
     this.log(JSON.stringify({ base }));
@@ -536,12 +544,26 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     this.log('about to  dispose sql resources for obsolete models');
     await Promise.all(
       obsoleteModels.map((obsoleteModel) =>
-        this.disposeSQLResourcesForModel(baseData, obsoleteModel)
-      )
+        this.disposeSQLResourcesForModel(baseData, obsoleteModel),
+      ),
     );
     this.log('done  disposing sql resources for obsolete models ....');
 
     this.allBaseData.set(base.id, baseData);
+  }
+
+  private async _watchBaseInternal(base: Base, rewatch: boolean) {
+    if (!base.id) {
+      // TODO: Log this error and report as incident
+      return;
+    }
+
+    if (base.is_meta) return;
+
+    this.log(`watching base ${base.id}`);
+    base.sources.forEach((source) => {
+      this._watchBaseInternalAndSource(base, source, rewatch);
+    });
   }
 
   async unwatchBase(base: Base) {
@@ -567,15 +589,12 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   async watchAllBases() {
-    const projects = await Project.list({});
-    const bases = (
-      await Promise.all(projects.map((project) => project.getBases()))
-    ).flat();
+    const bases = await Base.list({});
     const baseIds = bases.map((base) => base.id);
     //////// Retreive watched base data from DB and set it in this.allBaseData.
 
     const allObsoleteBaseData = Array.from(this.allBaseData.values()).filter(
-      (baseData) => !baseIds.includes(baseData.base.id)
+      (baseData) => !baseIds.includes(baseData.base.id),
     ); // this will always be null as this.allBaseData should be empty at this point as no baseData
     // exists in allBaseData confirm with logs
 
@@ -591,8 +610,10 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     }
   }
 
-  private async createKnex(base: Base): Promise<XKnex> {
-    const connectionConfig = await base.getConnectionConfig();
+  private async createKnex(base: Base, source: Source): Promise<XKnex> {
+    const s = await base.getSources();
+    s[0].getProject();
+    const connectionConfig = await source.getConnectionConfig();
     const options = merge(connectionConfig, {
       pool: {
         min: 0,
@@ -603,6 +624,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   static defaultInstance: PSQLRecordOperationWatcher;
+
   static async watchForWebhook(ncMeta: NcMetaIO) {
     const recordOperationWatcher = new PSQLRecordOperationWatcher(ncMeta);
     PSQLRecordOperationWatcher.defaultInstance = recordOperationWatcher;
@@ -622,9 +644,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
           newData = oldData;
           oldData = null;
         }
-        const project = await Project.get(model.project_id);
-        const bases = await project.getBases();
-        const currentBase = bases.find((base) => base.id === model.base_id);
+        const currentBase = await Base.get(model.base_id);
         const shouldNotProceed =
           currentBase.is_meta ||
           process.env.ESA_SKIP_DB_RECORD_ACTION_EVENT_WATCHER_FOR_WEBHOOK ===
@@ -644,7 +664,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
                 undefined,
                 oldData,
                 newData,
-                undefined
+                undefined,
               );
             }
           }
@@ -653,7 +673,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
           console.log('PSQLRecordEvent : hooks :: error', hookName, e);
           // add incident reporting here if clling a hook fails
         }
-      }
+      },
     );
 
     await recordOperationWatcher.watchAllBases();

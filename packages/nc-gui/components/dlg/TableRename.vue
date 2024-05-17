@@ -9,10 +9,11 @@ import {
   nextTick,
   reactive,
   storeToRefs,
-  useI18n,
+  useBase,
+  useCommandPalette,
   useMetas,
   useNuxtApp,
-  useProject,
+  useTablesStore,
   useTabs,
   useUndoRedo,
   useVModel,
@@ -23,14 +24,12 @@ import {
 interface Props {
   modelValue?: boolean
   tableMeta: TableType
-  baseId: string
+  sourceId: string
 }
 
-const { tableMeta, baseId, ...props } = defineProps<Props>()
+const { tableMeta, sourceId, ...props } = defineProps<Props>()
 
 const emit = defineEmits(['update:modelValue', 'updated'])
-
-const { t } = useI18n()
 
 const { $e, $api } = useNuxtApp()
 
@@ -40,15 +39,21 @@ const dialogShow = useVModel(props, 'modelValue', emit)
 
 const { updateTab } = useTabs()
 
-const projectStore = useProject()
-const { loadTables, isMysql, isMssql, isPg } = projectStore
-const { tables, project } = storeToRefs(projectStore)
+const { loadProjectTables } = useTablesStore()
+
+const baseStore = useBase()
+const { loadTables, isMysql, isMssql, isPg } = baseStore
+const { tables, base } = storeToRefs(baseStore)
+
+const { allRecentViews } = storeToRefs(useViewsStore())
+
+const { refreshCommandPalette } = useCommandPalette()
 
 const { addUndo, defineProjectScope } = useUndoRedo()
 
-const inputEl = $ref<ComponentPublicInstance>()
+const inputEl = ref<ComponentPublicInstance>()
 
-let loading = $ref(false)
+const loading = ref(false)
 
 const useForm = Form.useForm
 
@@ -64,15 +69,15 @@ const validators = computed(() => {
         validator: (rule: any, value: any) => {
           return new Promise<void>((resolve, reject) => {
             let tableNameLengthLimit = 255
-            if (isMysql(baseId)) {
+            if (isMysql(sourceId)) {
               tableNameLengthLimit = 64
-            } else if (isPg(baseId)) {
+            } else if (isPg(sourceId)) {
               tableNameLengthLimit = 63
-            } else if (isMssql(baseId)) {
+            } else if (isMssql(sourceId)) {
               tableNameLengthLimit = 128
             }
-            const projectPrefix = project?.value?.prefix || ''
-            if ((projectPrefix + value).length > tableNameLengthLimit) {
+            const basePrefix = base?.value?.prefix || ''
+            if ((basePrefix + value).length > tableNameLengthLimit) {
               return reject(new Error(`Table name exceeds ${tableNameLengthLimit} characters`))
             }
             resolve()
@@ -82,11 +87,10 @@ const validators = computed(() => {
       {
         validator: (rule: any, value: any) => {
           return new Promise<void>((resolve, reject) => {
-            if (/^\s+|\s+$/.test(value)) {
-              return reject(new Error('Leading or trailing whitespace not allowed in table name'))
-            }
             if (
-              !(tables?.value || []).every((t) => t.id === tableMeta.id || t.title.toLowerCase() !== (value || '').toLowerCase())
+              !(tables?.value || []).every(
+                (t) => t.id === tableMeta.id || t.title.toLowerCase() !== (value?.trim() || '').toLowerCase(),
+              )
             ) {
               return reject(new Error('Duplicate table alias'))
             }
@@ -105,7 +109,7 @@ watchEffect(
     if (tableMeta?.title) formState.title = `${tableMeta.title}`
 
     nextTick(() => {
-      const input = inputEl?.$el as HTMLInputElement
+      const input = inputEl.value?.$el as HTMLInputElement
 
       if (input) {
         input.setSelectionRange(0, formState.title.length)
@@ -116,32 +120,40 @@ watchEffect(
   { flush: 'post' },
 )
 
-const renameTable = async (undo = false) => {
+const renameTable = async (undo = false, disableTitleDiffCheck?: boolean | undefined) => {
   if (!tableMeta) return
 
-  loading = true
+  if (formState.title) {
+    formState.title = formState.title.trim()
+  }
+
+  if (formState.title === tableMeta.title && !disableTitleDiffCheck) return
+
+  loading.value = true
   try {
     await $api.dbTable.update(tableMeta.id as string, {
-      project_id: tableMeta.project_id,
+      base_id: tableMeta.base_id,
       table_name: formState.title,
       title: formState.title,
     })
 
     dialogShow.value = false
 
+    await loadProjectTables(tableMeta.base_id!, true)
+
     if (!undo) {
       addUndo({
         redo: {
           fn: (t: string) => {
             formState.title = t
-            renameTable(true)
+            renameTable(true, true)
           },
           args: [formState.title],
         },
         undo: {
           fn: (t: string) => {
             formState.title = t
-            renameTable(true)
+            renameTable(true, true)
           },
           args: [tableMeta.title],
         },
@@ -151,14 +163,23 @@ const renameTable = async (undo = false) => {
 
     await loadTables()
 
+    // update recent views if default view is renamed
+    allRecentViews.value = allRecentViews.value.map((v) => {
+      if (v.tableID === tableMeta.id) {
+        if (v.isDefault) v.viewName = formState.title
+
+        v.tableName = formState.title
+      }
+      return v
+    })
+
     // update metas
     const newMeta = await $api.dbTable.read(tableMeta.id as string)
     await setMeta(newMeta)
 
     updateTab({ id: tableMeta.id }, { title: newMeta.title })
 
-    // Table renamed successfully
-    message.success(t('msg.success.tableRenamed'))
+    refreshCommandPalette()
 
     $e('a:table:rename')
 
@@ -167,41 +188,48 @@ const renameTable = async (undo = false) => {
     message.error(await extractSdkResponseErrorMsg(e))
   }
 
-  loading = false
+  loading.value = false
 }
 </script>
 
 <template>
-  <a-modal
-    v-model:visible="dialogShow"
-    :class="{ active: dialogShow }"
-    :title="$t('activity.renameTable')"
-    :mask-closable="false"
-    wrap-class-name="nc-modal-table-rename"
-    @keydown.esc="dialogShow = false"
-    @finish="renameTable"
-  >
-    <template #footer>
-      <a-button key="back" @click="dialogShow = false">{{ $t('general.cancel') }}</a-button>
-
-      <a-button key="submit" type="primary" :loading="loading" @click="renameTable()">{{ $t('general.submit') }}</a-button>
+  <NcModal v-model:visible="dialogShow" size="small">
+    <template #header>
+      <div class="flex flex-row items-center gap-x-2">
+        <GeneralIcon icon="rename" />
+        {{ $t('activity.renameTable') }}
+      </div>
     </template>
-
-    <div class="pl-10 pr-10 pt-5">
+    <div class="mt-2">
       <a-form :model="formState" name="create-new-table-form">
-        <!-- hint="Enter table name" -->
-        <div class="mb-2">{{ $t('msg.info.enterTableName') }}</div>
-
         <a-form-item v-bind="validateInfos.title">
           <a-input
             ref="inputEl"
             v-model:value="formState.title"
+            class="nc-input-md"
             hide-details
+            size="large"
             :placeholder="$t('msg.info.enterTableName')"
-            @keydown.enter="renameTable()"
+            @keydown.enter="() => renameTable()"
           />
         </a-form-item>
       </a-form>
+      <div class="flex flex-row justify-end gap-x-2 mt-6">
+        <NcButton type="secondary" @click="dialogShow = false">{{ $t('general.cancel') }}</NcButton>
+
+        <NcButton
+          key="submit"
+          type="primary"
+          :disabled="validateInfos.title.validateStatus === 'error' || formState.title?.trim() === tableMeta.title"
+          label="Rename Table"
+          loading-label="Renaming Table"
+          :loading="loading"
+          @click="() => renameTable()"
+        >
+          {{ $t('title.renameTable') }}
+          <template #loading> {{ $t('title.renamingTable') }}</template>
+        </NcButton>
+      </div>
     </div>
-  </a-modal>
+  </NcModal>
 </template>

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useUIPermission } from '#imports'
+import { useRoles } from '#imports'
 
-const { isUIAllowed } = useUIPermission()
+const { isUIAllowed } = useRoles()
 </script>
 
 <template>
-  <div class="h-full overflow-y-scroll scrollbar-thin-dull pt-2">
+  <div class="h-full overflow-y-auto scrollbar-thin-dull pt-2">
     <template
       v-if="
         $route.params.nestedPage === 'password-reset' ||

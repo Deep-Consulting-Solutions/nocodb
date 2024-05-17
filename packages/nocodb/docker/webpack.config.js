@@ -1,28 +1,49 @@
+const path = require('path');
 const nodeExternals = require('webpack-node-externals');
-// const CopyPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
-// const JavaScriptObfuscator = require('webpack-obfuscator');
+const { resolveTsAliases } = require('../build-utils/resolveTsAliases');
 
 module.exports = {
-  entry: './docker/index.js',
+  entry: './src/run/dockerEntry.ts',
   module: {
-    rules: [],
+    rules: [
+      {
+        test: /\.tsx?$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'ts-loader',
+          options: {
+            transpileOnly: true,
+          },
+        },
+      },
+    ],
   },
   resolve: {
-    extensions: ['.js'],
+    extensions: ['.tsx', '.ts', '.js', '.json'],
+    alias: resolveTsAliases(path.resolve('tsconfig.json')),
   },
   output: {
+    path: require('path').resolve('./docker'),
+    filename: 'main.js',
     path: require('path').resolve('./docker'),
     filename: 'main.js',
     library: 'libs',
     libraryTarget: 'umd',
     globalObject: "typeof self !== 'undefined' ? self : this",
+    globalObject: "typeof self !== 'undefined' ? self : this",
   },
   optimization: {
     minimize: false, //Update this to true or false
-    minimizer: [new TerserPlugin()],
-    nodeEnv: false,
+    minimizer: [
+      new TerserPlugin({
+        terserOptions: {
+          keep_classnames: true,
+        },
+      }),
+    ],
+    nodeEnv:  false,
   },
   externals: [nodeExternals()],
   plugins: [new webpack.EnvironmentPlugin(['EE'])],

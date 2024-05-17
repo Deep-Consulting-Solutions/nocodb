@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-import TypescriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker&inline'
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker&inline'
+
 import type { editor as MonacoEditor } from 'monaco-editor'
-import { deepCompare, isDrawerOrModalExist, onMounted, ref, watch } from '#imports'
+import { deepCompare, initWorker, isDrawerOrModalExist, onMounted, ref, watch } from '#imports'
 
 interface Props {
   modelValue: string | Record<string, any>
@@ -12,22 +12,33 @@ interface Props {
   validate?: boolean
   disableDeepCompare?: boolean
   readOnly?: boolean
+  autoFocus?: boolean
 }
 
-const { hideMinimap, lang = 'json', validate = true, disableDeepCompare = false, modelValue, readOnly } = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  modelValue: '',
+  lang: 'json',
+  validate: true,
+  disableDeepCompare: false,
+  autoFocus: true,
+})
 
 const emits = defineEmits(['update:modelValue'])
 
-let vModel = $computed<string>({
+const { modelValue } = toRefs(props)
+
+const { hideMinimap, lang, validate, disableDeepCompare, readOnly, autoFocus } = props
+
+const vModel = computed<string>({
   get: () => {
-    if (typeof modelValue === 'object') {
-      return JSON.stringify(modelValue, null, 2)
+    if (typeof modelValue.value === 'object') {
+      return JSON.stringify(modelValue.value, null, 2)
     } else {
-      return modelValue
+      return modelValue.value ?? ''
     }
   },
   set: (newVal: string | Record<string, any>) => {
-    if (typeof modelValue === 'object') {
+    if (typeof modelValue.value === 'object') {
       try {
         emits('update:modelValue', typeof newVal === 'object' ? newVal : JSON.parse(newVal))
       } catch (e) {
@@ -45,15 +56,17 @@ const isValid = ref(true)
  * Adding monaco editor to Vite
  *
  * @ts-expect-error */
-self.MonacoEnvironment = {
-  getWorker(_: any, label: string) {
+self.MonacoEnvironment = window.MonacoEnvironment = {
+  async getWorker(_: any, label: string) {
     switch (label) {
-      case 'json':
-        return new JsonWorker()
-      case 'typescript':
-        return new TypescriptWorker()
-      default:
-        return new EditorWorker()
+      case 'json': {
+        const workerBlob = new Blob([JsonWorker], { type: 'text/javascript' })
+        return await initWorker(URL.createObjectURL(workerBlob))
+      }
+      default: {
+        const workerBlob = new Blob([EditorWorker], { type: 'text/javascript' })
+        return await initWorker(URL.createObjectURL(workerBlob))
+      }
     }
   },
 }
@@ -75,7 +88,7 @@ onMounted(async () => {
   const { editor: monacoEditor, languages } = await import('monaco-editor')
 
   if (root.value && lang) {
-    const model = monacoEditor.createModel(vModel, lang)
+    const model = monacoEditor.createModel(vModel.value, lang)
 
     if (lang === 'json') {
       // configure the JSON language support with schemas and schema associations
@@ -90,8 +103,8 @@ onMounted(async () => {
       foldingStrategy: 'indentation',
       selectOnLineNumbers: true,
       scrollbar: {
-        verticalScrollbarSize: 8,
-        horizontalScrollbarSize: 8,
+        verticalScrollbarSize: 1,
+        horizontalScrollbarSize: 1,
       },
       tabSize: 2,
       automaticLayout: true,
@@ -105,12 +118,12 @@ onMounted(async () => {
       try {
         isValid.value = true
 
-        if (disableDeepCompare) {
-          vModel = editor.getValue()
+        if (disableDeepCompare || lang !== 'json') {
+          vModel.value = editor.getValue()
         } else {
           const obj = JSON.parse(editor.getValue())
 
-          if (!obj || !deepCompare(vModel, obj)) vModel = obj
+          if (!obj || !deepCompare(vModel.value, obj)) vModel.value = obj
         }
       } catch (e) {
         isValid.value = false
@@ -118,18 +131,18 @@ onMounted(async () => {
       }
     })
 
-    if (!isDrawerOrModalExist()) {
+    if (!isDrawerOrModalExist() && autoFocus) {
       // auto focus on json cells only
       editor.focus()
     }
   }
 })
 
-watch($$(vModel), (v) => {
+watch(vModel, (v) => {
   if (!editor || !v) return
 
   const editorValue = editor?.getValue()
-  if (!disableDeepCompare) {
+  if (!disableDeepCompare && lang === 'json') {
     if (!editorValue || !deepCompare(JSON.parse(v), JSON.parse(editorValue))) {
       editor.setValue(v)
     }
@@ -137,6 +150,15 @@ watch($$(vModel), (v) => {
     if (editorValue !== v) editor.setValue(v)
   }
 })
+
+watch(
+  () => readOnly,
+  (v) => {
+    if (!editor) return
+
+    editor.updateOptions({ readOnly: v })
+  },
+)
 </script>
 
 <template>

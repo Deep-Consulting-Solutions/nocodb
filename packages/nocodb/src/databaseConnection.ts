@@ -16,7 +16,7 @@ export const runMigrations = async (connection: Connection) => {
 
   const pendingMigrations = await new MigrationExecutor(
     connection,
-    connection.createQueryRunner('master')
+    connection.createQueryRunner('master'),
   ).getPendingMigrations();
 
   if (pendingMigrations.length) {
@@ -25,7 +25,7 @@ export const runMigrations = async (connection: Connection) => {
     try {
       await new MigrationExecutor(
         connection,
-        connection.createQueryRunner('master')
+        connection.createQueryRunner('master'),
       ).executePendingMigrations();
 
       console.log('Migrations Executed!');

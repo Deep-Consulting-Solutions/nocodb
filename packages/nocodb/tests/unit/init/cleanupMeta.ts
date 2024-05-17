@@ -1,29 +1,27 @@
-import Model from '../../../src/lib/models/Model';
-import Project from '../../../src/lib/models/Project';
-import NcConnectionMgrv2 from '../../../src/lib/utils/common/NcConnectionMgrv2';
-import { orderedMetaTables } from '../../../src/lib/utils/globals';
+import { Base, Model } from '~/models';
+import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
+import { orderedMetaTables } from '~/utils/globals';
 import TestDbMngr from '../TestDbMngr';
-import { isPg } from './db';
 
 const dropTablesAllNonExternalProjects = async () => {
-  const projects = await Project.list({});
+  const bases = await Base.list({});
   const userCreatedTableNames: string[] = [];
   await Promise.all(
-    projects
-      .filter((project) => project.is_meta)
-      .map(async (project) => {
-        await project.getBases();
-        const base = project.bases && project.bases[0];
-        if (!base) return;
+    bases
+      .filter((base) => base.is_meta)
+      .map(async (base) => {
+        await base.getSources();
+        const source = base.sources && base.sources[0];
+        if (!source) return;
 
         const models = await Model.list({
-          project_id: project.id,
-          base_id: base.id!,
+          base_id: base.id,
+          source_id: source.id!,
         });
         models.forEach((model) => {
           userCreatedTableNames.push(model.table_name);
         });
-      })
+      }),
   );
 
   await TestDbMngr.disableForeignKeyChecks(TestDbMngr.metaKnex);
