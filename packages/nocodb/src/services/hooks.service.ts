@@ -30,6 +30,42 @@ export class HooksService {
     }
   }
 
+  private replaceEnvVariable(str: string): string {
+    const regex = /<<(\w+)>>/;
+    const match = str.match(regex);
+
+    if (match) {
+      const key = `WEBHOOK_URLS_${match[1]}`;
+      const value = process.env[key];
+
+      if (value) {
+        return value;
+      } else {
+        console.warn(`Environment variable ${key} not found`);
+        NcError.badRequest('Invalid webhook url provided');
+      }
+    }
+    return str;
+  }
+
+  private updateNotificationPayload(
+    notification: Record<string, any>,
+  ): Record<string, any> {
+    const path = notification.payload?.path || '';
+    const webhookUrl = this.replaceEnvVariable(path);
+
+    if (path) {
+      return {
+        ...notification,
+        payload: {
+          ...notification.payload,
+          path: webhookUrl,
+        },
+      };
+    }
+    return notification;
+  }
+
   async hookList(param: { tableId: string }) {
     return await Hook.list({ fk_model_id: param.tableId });
   }
@@ -46,6 +82,11 @@ export class HooksService {
     validatePayload('swagger.json#/components/schemas/HookReq', param.hook);
 
     this.validateHookPayload(param.hook.notification);
+    if (typeof param.hook.notification === 'object') {
+      param.hook.notification = this.updateNotificationPayload(
+        param.hook.notification,
+      );
+    }
 
     const hook = await Hook.insert({
       ...param.hook,
@@ -89,6 +130,11 @@ export class HooksService {
     }
 
     this.validateHookPayload(param.hook.notification);
+    if (typeof param.hook.notification === 'object') {
+      param.hook.notification = this.updateNotificationPayload(
+        param.hook.notification,
+      );
+    }
 
     const res = await Hook.update(param.hookId, param.hook);
 
@@ -121,6 +167,11 @@ export class HooksService {
       hook,
       payload: { data, user },
     } = param.hookTest;
+
+    if (typeof hook.notification === 'object') {
+      hook.notification = this.updateNotificationPayload(hook.notification);
+    }
+
     try {
       await invokeWebhook(
         new Hook(hook),
