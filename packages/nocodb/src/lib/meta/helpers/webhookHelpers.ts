@@ -181,7 +181,8 @@ export async function handleHttpWebHook(
   const req = axiosRequestMake(
     apiMeta,
     user,
-    constructWebHookData(hook, model, view, prevData, newData)
+    constructWebHookData(hook, model, view, prevData, newData),
+    true
   );
   req.headers['esa-key'] = process.env.NOCODB_ESA_KEY;
   const res: any = await new Promise((resolve, reject) => {
@@ -218,7 +219,7 @@ export async function handleHttpWebHook(
   return res;
 }
 
-export function axiosRequestMake(_apiMeta, _user, data) {
+export function axiosRequestMake(_apiMeta, _user, data, forWebhook = false) {
   const apiMeta = { ..._apiMeta };
   // if it's a string try to parse and apply handlebar
   // or if object then convert into JSON string and parse it
@@ -263,7 +264,10 @@ export function axiosRequestMake(_apiMeta, _user, data) {
       : {},
     url: parseBody(apiMeta.path, data),
     method: apiMeta.method,
-    data: apiMeta.body,
+    data:
+      typeof apiMeta.body === 'string' && forWebhook
+        ? JSON.parse(apiMeta.body)
+        : apiMeta.body,
     headers: apiMeta.headers
       ? apiMeta.headers.reduce((headersObj, header) => {
           if (header.name && header.enabled) {
