@@ -45,7 +45,7 @@ const defaultConnectionConfig: any = {
 const defaultConnectionOptions = {
   pool: {
     min: 0,
-    max: 10,
+    max: 5,
   },
 };
 
