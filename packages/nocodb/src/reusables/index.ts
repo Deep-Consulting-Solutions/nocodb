@@ -39,6 +39,7 @@ export const getIncidentHandlerConfig = ({
     },
     redis: redis.client,
     zoho: {
+      concurrencyManagerUrl: process.env.MANAGER_URL! || '',
       desk: {
         config: {
           accountsUrl:
