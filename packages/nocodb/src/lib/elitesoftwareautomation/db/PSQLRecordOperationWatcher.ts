@@ -42,7 +42,7 @@ const regexForCharactersToReplace = /-/g;
 export class PSQLRecordOperationWatcher extends EventEmitter {
   public readonly recordOperationEventType = 'record-operation';
   private readonly rewatchErrorRetryDelayMillis = 3000;
-  private readonly throttleDelayMillis = process.env.THROTTLE_DELAY_MILLIS || 5000;
+  private readonly throttleDelayMillis = parseInt(process.env.THROTTLE_DELAY_MILLIS) || 5000;
   private readonly consumptionBatchCount = 30;
 
   // NOTE: the objects stored here are used for compare by reference in various parts of the program
