@@ -11,6 +11,7 @@ import getTableNameAlias, {
 import mapDefaultDisplayValue from '../meta/helpers/mapDefaultDisplayValue';
 import getColumnUiType from '../meta/helpers/getColumnUiType';
 import type { LinkToAnotherRecordColumn } from '../models';
+import { redOptLock } from '../utils/redis';
 
 export enum MetaDiffType {
   TABLE_NEW = 'TABLE_NEW',
@@ -777,6 +778,8 @@ export async function baseMetaDiffSync(param: {
   projectId: string;
   baseId: string;
 }) {
+  const lockKey = `nc:metaDiffSync:lock:${param.projectId}`;
+  const unlock = await redOptLock(lockKey);
   const project = await Project.getWithInfo(param.projectId);
   const base = await Base.get(param.baseId);
 
@@ -961,6 +964,7 @@ export async function baseMetaDiffSync(param: {
   await extractAndGenerateManyToManyRelations(await base.getModels());
 
   T.emit('evt', { evt_type: 'baseMetaDiff:synced' });
+  await unlock();
 
   return true;
 }

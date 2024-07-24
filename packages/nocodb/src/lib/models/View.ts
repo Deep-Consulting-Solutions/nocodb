@@ -24,6 +24,7 @@ import Column from './Column';
 import MapView from './MapView';
 import MapViewColumn from './MapViewColumn';
 import type { BoolType, ColumnReqType, ViewType } from 'nocodb-sdk';
+import { createIncidentLog } from '../incidentLogger';
 
 const { v4: uuidv4 } = require('uuid');
 export default class View implements ViewType {
@@ -986,6 +987,20 @@ export default class View implements ViewType {
 
   // @ts-ignore
   static async delete(viewId, ncMeta = Noco.ncMeta) {
+    if (!viewId) {
+      await createIncidentLog(
+        {
+          errorMessage: `Error occurred during a metadata sync: viewId is missing`,
+          errorStackTrace: '',
+          incidentTime: new Date(),
+        },
+        {},
+        (defaultTitle) => {
+          return `System triggered - ${defaultTitle}`;
+        }
+      );
+      return;
+    }
     const view = await this.get(viewId);
     await Sort.deleteAll(viewId);
     await Filter.deleteAll(viewId);
