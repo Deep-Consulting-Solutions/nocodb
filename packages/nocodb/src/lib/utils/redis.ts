@@ -29,9 +29,8 @@ export async function redOptLock (
     };
   } catch (e) {
     if (e.name === 'LockError') {
-      console.log(`unable to acquire lock for resource: "${key}". Retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return redOptLock(key, lockDurationMS);
+      console.log(`unable to acquire lock for metadata sync`);
+      throw new Error('Unable to acquire lock for metadata sync, another sync is probably in progress');
     }
     throw e;
   }
