@@ -596,7 +596,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     const options = merge(connectionConfig, {
       pool: {
         min: 0,
-        max: 3,
+        max: 2,
       },
     });
     return XKnex(options);
