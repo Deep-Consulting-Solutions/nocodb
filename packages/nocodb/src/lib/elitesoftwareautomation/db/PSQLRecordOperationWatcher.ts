@@ -517,29 +517,29 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
     this.log(JSON.stringify({ base }));
 
     await this.setupSQLResources(baseData, newModels);
-    this.log('finished seting up sql resources ...');
+    // this.log('finished seting up sql resources ...');
 
-    this.log('about to consume notifications');
+    // this.log('about to consume notifications');
     void this.consumeNotifications(baseData);
-    this.log('finished consuming notifications ..... ');
+    // this.log('finished consuming notifications ..... ');
 
     if (createNewBaseData || rewatch) {
       const connection = await baseData.knex.client.acquireConnection();
 
-      this.log('about to register listeners');
+      // this.log('about to register listeners');
       // start watching
       // ///////////
       await this.registerListeners(baseData, connection);
-      this.log('finished registering listeners ...');
+      // this.log('finished registering listeners ...');
     }
 
-    this.log('about to  dispose sql resources for obsolete models');
+    // this.log('about to  dispose sql resources for obsolete models');
     await Promise.all(
       obsoleteModels.map((obsoleteModel) =>
         this.disposeSQLResourcesForModel(baseData, obsoleteModel)
       )
     );
-    this.log('done  disposing sql resources for obsolete models ....');
+    // this.log('done  disposing sql resources for obsolete models ....');
 
     this.allBaseData.set(base.id, baseData);
   }

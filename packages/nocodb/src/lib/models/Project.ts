@@ -355,14 +355,14 @@ export default class Project implements ProjectType {
   }
 
   static async getByTitleOrId(titleOrId: string, ncMeta = Noco.ncMeta) {
-    console.log('about to check cache for project ref titleOrId');
+    // console.log('about to check cache for project ref titleOrId');
     const projectId =
       titleOrId &&
       (await NocoCache.get(
         `${CacheScope.PROJECT}:ref:${titleOrId}`,
         CacheGetType.TYPE_OBJECT
       ));
-    console.log('finished checking cache for project ref  titleOrId');
+    // console.log('finished checking cache for project ref  titleOrId');
     let projectData = null;
     if (!projectId) {
       projectData = await Noco.ncMeta.metaGet2(
@@ -388,12 +388,12 @@ export default class Project implements ProjectType {
           ],
         }
       );
-      console.log('about to set project ref  titleOrId in cache');
+      // console.log('about to set project ref  titleOrId in cache');
       await NocoCache.set(
         `${CacheScope.PROJECT}:ref:${titleOrId}`,
         projectData?.id
       );
-      console.log('finished to set project ref  titleOrId in cache');
+      // console.log('finished to set project ref  titleOrId in cache');
     } else {
       return this.get(projectId);
     }
