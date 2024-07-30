@@ -143,12 +143,12 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       .delete();
 
     if (notifications.length) {
-      this.log(
-        'consuming notifications : ',
-        notifications.map((notification) =>
-          pick(notification, ['nocodbModelId'])
-        )
-      );
+      // this.log(
+      //   'consuming notifications : ',
+      //   notifications.map((notification) =>
+      //     pick(notification, ['nocodbModelId'])
+      //   )
+      // );
     }
 
     if (numOfRows > perPage) {
