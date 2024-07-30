@@ -116,24 +116,24 @@ export async function getDataList(param: {
   // ////////// add logs here to see cause of slow
   const { model, view, query = {} } = param;
 
-  console.log('getDataList about to get base ...');
+  // console.log('getDataList about to get base ...');
   const base = await Base.get(model.base_id);
-  console.log('getDataList finished getting base ...');
+  // console.log('getDataList finished getting base ...');
 
-  console.log('getDataList about to get model ...');
+  // console.log('getDataList about to get model ...');
   const baseModel = await Model.getBaseModelSQL({
     id: model.id,
     viewId: view?.id,
     dbDriver: await NcConnectionMgrv2.get(base),
   });
-  console.log('getDataList finished getting model ...');
+  // console.log('getDataList finished getting model ...');
 
-  console.log('getDataList about to get ast ....');
-  log(JSON.stringify({ model }));
-  log(JSON.stringify({ query }));
-  log(JSON.stringify({ view }));
+  // console.log('getDataList about to get ast ....');
+  // log(JSON.stringify({ model }));
+  // log(JSON.stringify({ query }));
+  // log(JSON.stringify({ view }));
   const { ast, dependencyFields } = await getAst({ model, query, view });
-  console.log('getDataList finished getting ast ....');
+  // console.log('getDataList finished getting ast ....');
 
   const listArgs: any = dependencyFields;
   try {
@@ -146,21 +146,21 @@ export async function getDataList(param: {
   let data = [];
   let count = 0;
   try {
-    console.log('getDataList about to get data ....');
-    log(JSON.stringify({ ast }));
-    log(JSON.stringify({ listArgs }));
+    // console.log('getDataList about to get data ....');
+    // log(JSON.stringify({ ast }));
+    // log(JSON.stringify({ listArgs }));
     data = await nocoExecute(ast, await baseModel.list(listArgs), {}, listArgs);
-    console.log('getDataList finished getting data ....');
+    // console.log('getDataList finished getting data ....');
 
-    console.log('getDataList about to get count ....');
+    // console.log('getDataList about to get count ....');
     count = await baseModel.count(listArgs);
-    console.log('getDataList finished getting count ....');
+    // console.log('getDataList finished getting count ....');
   } catch (e) {
     console.log(e);
     NcError.internalServerError('Please check server log for more details');
   }
 
-  log(JSON.stringify({ data }));
+  // log(JSON.stringify({ data }));
 
   return new PagedResponseImpl(data, {
     ...query,

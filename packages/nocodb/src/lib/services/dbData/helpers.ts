@@ -33,16 +33,16 @@ export async function getViewAndModelByAliasOrId(param: {
   tableName: string;
   viewName?: string;
 }) {
-  log('about to fetch project in getViewAndModelByAliasOrId');
+  // log('about to fetch project in getViewAndModelByAliasOrId');
   const project = await Project.getWithInfoByTitleOrId(param.projectName);
-  log('fetched project in getViewAndModelByAliasOrId ...');
-  log(JSON.stringify({ project }));
+  // log('fetched project in getViewAndModelByAliasOrId ...');
+  // log(JSON.stringify({ project }));
 
   const model = await Model.getByAliasOrId({
     project_id: project.id,
     aliasOrId: param.tableName,
   });
-  log(JSON.stringify({ model }));
+  // log(JSON.stringify({ model }));
 
   const view =
     param.viewName &&
@@ -50,7 +50,7 @@ export async function getViewAndModelByAliasOrId(param: {
       titleOrId: param.viewName,
       fk_model_id: model.id,
     }));
-    log(JSON.stringify({ view }))
+    // log(JSON.stringify({ view }))
   if (!model) NcError.notFound('Table not found');
   return { model, view };
 }
