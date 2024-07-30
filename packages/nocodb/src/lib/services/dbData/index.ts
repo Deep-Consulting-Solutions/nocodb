@@ -7,13 +7,13 @@ import NcConnectionMgrv2 from '../../utils/common/NcConnectionMgrv2';
 import { getViewAndModelByAliasOrId } from './helpers';
 import type { PathParams } from './helpers';
 
-const log = (
-  message: string,
-  extraData?: any,
-  level: 'log' | 'error' | 'warn' | 'info' = 'log'
-) => {
-  console[level](`helpers : ${message}`, extraData);
-};
+// const log = (
+//   message: string,
+//   extraData?: any,
+//   level: 'log' | 'error' | 'warn' | 'info' = 'log'
+// ) => {
+//   console[level](`helpers : ${message}`, extraData);
+// };
 
 export async function dataList(param: PathParams & { query: any }) {
   const { model, view } = await getViewAndModelByAliasOrId(param);

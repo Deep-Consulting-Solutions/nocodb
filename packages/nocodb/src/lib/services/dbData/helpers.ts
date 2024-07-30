@@ -14,13 +14,13 @@ import type LookupColumn from '../../models/LookupColumn';
 import type { BaseModelSqlv2 } from '../../db/sql-data-mapper/lib/sql/BaseModelSqlv2';
 import type { Request } from 'express';
 
-const log = (
-  message: string,
-  extraData?: any,
-  level: 'log' | 'error' | 'warn' | 'info' = 'log'
-) => {
-  console[level](`helpers : ${message}`, extraData);
-};
+// const log = (
+//   message: string,
+//   extraData?: any,
+//   level: 'log' | 'error' | 'warn' | 'info' = 'log'
+// ) => {
+//   console[level](`helpers : ${message}`, extraData);
+// };
 
 export interface PathParams {
   projectName: string;
