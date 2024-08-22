@@ -398,6 +398,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   private async _watchBaseInternal(base: Base, rewatch: boolean) {
+    process.stderr.write('watchBaseInternal : called' + JSON.stringify(base));
     if (!base.id) {
       // TODO: Log this error and report as incident
       return;
@@ -415,10 +416,13 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
         },
       }
     );
+    process.stderr.write('watchBaseInternal : foundModelData: ' + JSON.stringify(foundModelData));
 
     const models = foundModelData.map(
       (foundModelDatum) => new Model(foundModelDatum)
     );
+
+    process.stderr.write('watchBaseInternal : models: ' + JSON.stringify(models));
 
     const obsoleteModels: Model[] = [];
 
@@ -427,10 +431,14 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
     let baseData: IBaseData = this.allBaseData.get(base.id);
 
+    process.stderr.write('watchBaseInternal : baseData: ' + JSON.stringify(baseData));
+
     this.log(`watching base ${base.alias}`);
     this.log(`watching base ${base.id}`);
 
     const connectionOptions = (await base.getConnectionConfig()).connection;
+
+    process.stderr.write('watchBaseInternal : connectionOptions: ' + JSON.stringify(connectionOptions));
 
     const createNewBaseData =
       !baseData ||
@@ -444,7 +452,10 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       await this.unwatchBase(baseData.base);
     }
 
+    process.stderr.write('watchBaseInternal : createNewBaseData: ' + JSON.stringify(createNewBaseData));
+
     if (createNewBaseData) {
+      process.stderr.write('watchBaseInternal : createNewBaseData: true');
       const knex = await this.createKnex(base);
       baseData = {
         base,
@@ -455,6 +466,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
       newModels.push(...models);
     } else {
+      process.stderr.write('watchBaseInternal : createNewBaseData: false');
       //////// this never even gets used as baseData will be empty
       const modelIds = models.map((model) => model.id); /////// //////// //  why is tablename being mapped to modelIDs
       obsoleteModels.push(
