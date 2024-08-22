@@ -514,7 +514,7 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
       obsoleteModels.map((model) => pick(model, pickedFields))
     );
 
-    this.log(JSON.stringify({ base }));
+    // this.log(JSON.stringify({ base }));
 
     await this.setupSQLResources(baseData, newModels);
     // this.log('finished seting up sql resources ...');
@@ -567,28 +567,35 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
   }
 
   async watchAllBases() {
+    process.stderr.write('watchAllBases : called\n');
     const projects = await Project.list({});
+    process.stderr.write(`watchAllBases : projects: ${JSON.stringify(projects)}\n`);
     const bases = (
       await Promise.all(projects.map((project) => project.getBases()))
     ).flat();
+    process.stderr.write(`watchAllBases : bases: ${JSON.stringify(bases)}\n`);
     const baseIds = bases.map((base) => base.id);
+    process.stderr.write(`watchAllBases : baseIds: ${JSON.stringify(baseIds)}\n`);
     //////// Retreive watched base data from DB and set it in this.allBaseData.
 
     const allObsoleteBaseData = Array.from(this.allBaseData.values()).filter(
       (baseData) => !baseIds.includes(baseData.base.id)
     ); // this will always be null as this.allBaseData should be empty at this point as no baseData
     // exists in allBaseData confirm with logs
+    process.stderr.write(`watchAllBases : allObsoleteBaseData: ${JSON.stringify(allObsoleteBaseData)}\n`);
 
-    this.log(JSON.stringify({ allBaseData: this.allBaseData }));
-    this.log(JSON.stringify({ allObsoleteBaseData }));
+    // this.log(JSON.stringify({ allBaseData: this.allBaseData }));
+    // this.log(JSON.stringify({ allObsoleteBaseData }));
     for (const base of bases) {
       await this.watchBase(base);
     }
+    process.stderr.write('watchAllBases : done watching bases\n');
 
     for (const obsoleteBaseData of allObsoleteBaseData) {
       // no base will ever be unwatched as allObsoleteBaseData is empty
       await this.unwatchBase(obsoleteBaseData.base);
     }
+    process.stderr.write('watchAllBases : done unwatching bases\n');
   }
 
   private async createKnex(base: Base): Promise<XKnex> {
