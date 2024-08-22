@@ -604,8 +604,11 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
 
   static defaultInstance: PSQLRecordOperationWatcher;
   static async watchForWebhook(ncMeta: NcMetaIO) {
+    console.log('PSQLRecordOperationWatcher : watchForWebhook');
     const recordOperationWatcher = new PSQLRecordOperationWatcher(ncMeta);
+    console.log('PSQLRecordOperationWatcher : watchForWebhook : instance created');
     PSQLRecordOperationWatcher.defaultInstance = recordOperationWatcher;
+    console.log('PSQLRecordOperationWatcher : watchForWebhook : defaultInstance set');
 
     recordOperationWatcher.on(
       recordOperationWatcher.recordOperationEventType,
@@ -615,16 +618,25 @@ export class PSQLRecordOperationWatcher extends EventEmitter {
         oldData,
         newData,
       }: PSQLRecordOperationEvent) => {
+        console.log('PSQLRecordOperationWatcher: hook invoked');
         const theOperation = operation as HookType['operation'];
         const event = 'after';
+        console.dir({ model, operation, oldData, newData }, { depth: null });
 
         if (theOperation === 'delete') {
           newData = oldData;
           oldData = null;
         }
+        console.log('getting bases');
         const project = await Project.get(model.project_id);
+        console.log('got project');
+        console.dir({ project }, { depth: null });
         const bases = await project.getBases();
+        console.log('got bases');
+        console.dir({ bases }, { depth: null });
         const currentBase = bases.find((base) => base.id === model.base_id);
+        console.log('got currentBase');
+        console.dir({ currentBase }, { depth: null });
         const shouldNotProceed =
           currentBase.is_meta ||
           process.env.ESA_SKIP_DB_RECORD_ACTION_EVENT_WATCHER_FOR_WEBHOOK ===
