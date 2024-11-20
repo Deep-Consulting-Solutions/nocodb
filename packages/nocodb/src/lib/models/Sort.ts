@@ -126,6 +126,9 @@ export default class Sort {
       });
       await NocoCache.setList(CacheScope.SORT, [viewId], sortList);
     }
+
+    console.log({ sortList })
+    sortList = sortList.filter(i => !!i);
     sortList.sort(
       (a, b) =>
         (a.order != null ? a.order : Infinity) -
