@@ -1,5 +1,5 @@
 import { Column, Entity } from 'typeorm';
-import { SyncStatus } from '@deep-consulting-solutions/incident-handling';
+import { SyncStatus } from '@balance-my-hormones/incident-handling';
 
 import GenericEntity from './GenericEntity';
 

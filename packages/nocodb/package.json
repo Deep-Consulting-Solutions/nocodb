@@ -55,8 +55,8 @@
     "node": ">=8.9"
   },
   "dependencies": {
-    "@deep-consulting-solutions/incident-handling": "^0.0.43",
-    "@deep-consulting-solutions/nc-lib-gui": "0.0.4",
+    "@balance-my-hormones/incident-handling": "^0.0.43",
+    "@balance-my-hormones/nc-lib-gui": "^0.0.4",
     "@google-cloud/storage": "^5.7.2",
     "@graphql-tools/merge": "^6.0.12",
     "@sentry/node": "^6.3.5",

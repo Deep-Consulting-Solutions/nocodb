@@ -1,5 +1,5 @@
-import incidentHandler from '@deep-consulting-solutions/incident-handling';
-import type { Incident } from '@deep-consulting-solutions/incident-handling';
+import incidentHandler from '@balance-my-hormones/incident-handling';
+import type { Incident } from '@balance-my-hormones/incident-handling';
 
 export const createIncidentLog = async (
   data: Incident,
